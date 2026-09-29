@@ -141,6 +141,39 @@ def _card(parent, **kw):
     return tk.Frame(parent, bg=C["bg_card"], relief="flat", bd=0, **kw)
 
 
+def _scrollable_frame(parent):
+    """
+    Retorna (outer_frame, inner_frame).
+    outer_frame deve ser packed no content.
+    inner_frame é onde se adiciona os widgets — tem scroll vertical automático.
+    """
+    outer = tk.Frame(parent, bg=C["bg"])
+    canvas = tk.Canvas(outer, bg=C["bg"], highlightthickness=0)
+    vsb = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+    canvas.configure(yscrollcommand=vsb.set)
+
+    inner = tk.Frame(canvas, bg=C["bg"])
+    win_id = canvas.create_window((0, 0), window=inner, anchor="nw")
+
+    def _on_configure(event):
+        canvas.configure(scrollregion=canvas.bbox("all"))
+        canvas.itemconfig(win_id, width=canvas.winfo_width())
+
+    inner.bind("<Configure>", _on_configure)
+    canvas.bind("<Configure>", lambda e: canvas.itemconfig(win_id, width=e.width))
+
+    # Scroll com roda do mouse
+    def _mousewheel(event):
+        canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    canvas.bind_all("<MouseWheel>", _mousewheel)
+
+    canvas.pack(side="left", fill="both", expand=True)
+    vsb.pack(side="right", fill="y")
+
+    return outer, inner
+
+
 # ── subprocess silencioso (sem janela preta) ──────────────────────────────────
 _NO_WIN = 0x08000000  # CREATE_NO_WINDOW
 
@@ -334,25 +367,14 @@ class WBSystemCare(tk.Tk):
         self.resizable(True, True)
         self._start_minimized = start_minimized
 
-        # Detecta resolução e adapta o tamanho inicial
+        # Detecta resolução e define tamanho fixo (não muda entre abas)
         self.update_idletasks()
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
 
-        if sw <= 1280 or sh <= 768:
-            # Resolução baixa — maximiza automaticamente
-            self.state("zoomed")
-            self.minsize(900, 560)
-        elif sw <= 1600:
-            # Resolução média
-            w, h = min(1100, sw - 40), min(720, sh - 80)
-            self.geometry(f"{w}x{h}")
-            self.minsize(900, 560)
-            self.state("zoomed")
-        else:
-            # Resolução alta — abre maximizado também para não ficar pequeno
-            self.state("zoomed")
-            self.minsize(960, 600)
+        # Inicia sempre maximizado para não cortar conteúdo em nenhuma resolução
+        self.state("zoomed")
+        self.minsize(900, 600)
 
         # Ícone
         if os.path.exists(ICON_PATH):
@@ -577,8 +599,10 @@ class WBSystemCare(tk.Tk):
     # ── Página: Tema ──────────────────────────────────────────────────────────
 
     def _build_page_theme(self):
-        p = tk.Frame(self._content, bg=C["bg"])
-        self._pages["theme"] = p
+        outer = tk.Frame(self._content, bg=C["bg"])
+        self._pages["theme"] = outer
+        scroll_outer, p = _scrollable_frame(outer)
+        scroll_outer.pack(fill="both", expand=True)
         _page_title(p, "🎨  Personalização do Windows",
                     "Selecione o que deseja restaurar para os padrões de fábrica.")
 
@@ -639,26 +663,49 @@ class WBSystemCare(tk.Tk):
         _page_title(p, "🔍  Varredura de Arquivos",
                     "Lista recursiva das pastas do usuário. Selecione os itens para excluir.")
 
-        # Ações
-        ab = tk.Frame(p, bg=C["bg"])
-        ab.pack(fill="x", padx=20, pady=(0,4))
-        _btn(ab, "📁  1. Incluir Pasta Extra",  self._add_folder,       width=22).pack(side="left", padx=(0,6))
-        _btn(ab, "🔍  2. Escanear Agora",       self._run_scan,         width=20).pack(side="left", padx=(0,6))
-        _btn(ab, "🗑  3. Excluir Selecionados", self._run_delete, "danger", width=22).pack(side="left")
+        # ── Linha 1: Configuração ANTES de escanear ─────────────────────────
+        config_bar = tk.Frame(p, bg=C["bg_card"])
+        config_bar.pack(fill="x", padx=20, pady=(0, 2))
+        tk.Frame(config_bar, bg=C["accent"], height=2).pack(fill="x")
+        cf_inner = tk.Frame(config_bar, bg=C["bg_card"])
+        cf_inner.pack(fill="x", padx=12, pady=6)
 
-        # Seleção rápida
+        tk.Label(cf_inner, text="① Preparar:", bg=C["bg_card"],
+                 fg=C["text_dim"], font=FONT_SMALL).pack(side="left", padx=(0,8))
+
+        _btn(cf_inner, "📂  Escolher Pastas para Varrer",
+             self._choose_folders_to_scan, width=28).pack(side="left", padx=(0,6))
+
+        # Label mostrando pastas escolhidas
+        self._chosen_folders_lbl = tk.Label(
+            cf_inner, text="Todas as pastas do perfil (padrão)",
+            bg=C["bg_card"], fg=C["text_dim"], font=FONT_TINY, anchor="w"
+        )
+        self._chosen_folders_lbl.pack(side="left", fill="x", expand=True, padx=(4,0))
+
+        # ── Linha 2: Ações principais ─────────────────────────────────────
+        ab = tk.Frame(p, bg=C["bg"])
+        ab.pack(fill="x", padx=20, pady=(6, 4))
+
+        tk.Label(ab, text="② Executar:", bg=C["bg"],
+                 fg=C["text_dim"], font=FONT_SMALL).pack(side="left", padx=(0,8))
+
+        _btn(ab, "🔍  Escanear",         self._run_scan,           width=14).pack(side="left", padx=(0,6))
+        _btn(ab, "🗑  Excluir Marcados",  self._run_delete, "danger", width=18).pack(side="left", padx=(0,6))
+        _btn(ab, "🔄  Limpar / Recomeçar", self._scan_clear,        width=20).pack(side="left")
+
+        # ── Linha 3: Seleção ──────────────────────────────────────────────
         sf = tk.Frame(p, bg=C["bg"])
-        sf.pack(fill="x", padx=20, pady=(0,4))
-        for txt, cmd in [("☑ Selecionar Tudo", self._sel_all),
-                         ("☐ Desmarcar Tudo",   self._desel_all)]:
+        sf.pack(fill="x", padx=20, pady=(0, 4))
+
+        tk.Label(sf, text="③ Selecionar:", bg=C["bg"],
+                 fg=C["text_dim"], font=FONT_SMALL).pack(side="left", padx=(0,8))
+
+        for txt, cmd in [("☑ Tudo", self._sel_all), ("☐ Nenhum", self._desel_all)]:
             tk.Button(sf, text=txt, font=FONT_SMALL,
                       bg=C["bg_card"], fg=C["text_dim"],
                       activebackground=C["border"], relief="flat", cursor="hand2",
                       command=cmd).pack(side="left", padx=(0,6))
-
-        # Seleção por pasta
-        _btn(sf, "📂  Selecionar Pasta", self._sel_by_folder, width=18).pack(side="left", padx=(0,6))
-        _btn(sf, "⊟  Recolher Tudo",    self._collapse_all,  width=16).pack(side="left")
 
         self._scan_sum_lbl = tk.Label(sf, text="Nenhuma varredura realizada.",
                                       bg=C["bg"], fg=C["text_dim"], font=FONT_SMALL)
@@ -682,26 +729,30 @@ class WBSystemCare(tk.Tk):
                   background=[("selected", C["sel_bg"])],
                   foreground=[("selected", C["sel_fg"])])
 
-        cols = ("sel","nome","tipo","tamanho","modificado","pasta","caminho")
-        self._tree = ttk.Treeview(tf, columns=cols, show="headings",
+        cols = ("sel","tipo","tamanho","modificado","pasta")
+        self._tree = ttk.Treeview(tf, columns=cols,
+                                  show="tree headings",   # mostra a coluna de árvore + setas nativas
                                   selectmode="extended", style="WB.Treeview")
 
+        # Coluna de árvore (col #0) — mostra nome com cascata
+        self._tree.column("#0", width=280, minwidth=160, stretch=True, anchor="w")
+        self._tree.heading("#0", text="Nome / Caminho",
+                           command=lambda: self._sort_scan("nome"))
+
         col_defs = [
-            ("sel",       "✔",               30,  False, "center"),
-            ("nome",      "Nome",            200, True,  "w"),
-            ("tipo",      "Tipo",             60, False, "center"),
-            ("tamanho",   "Tamanho",          80, False, "e"),
-            ("modificado","Modificado",      120, False, "center"),
-            ("pasta",     "Pasta Raiz",      110, False, "w"),
-            ("caminho",   "Caminho Completo",260, True,  "w"),
+            ("sel",       "✔",          30,  False, "center"),
+            ("tipo",      "Tipo",        60, False, "center"),
+            ("tamanho",   "Tamanho",     90, False, "e"),
+            ("modificado","Modificado", 130, False, "center"),
+            ("pasta",     "Pasta Raiz", 120, False, "w"),
         ]
         for col, hd, w, stretch, anchor in col_defs:
             self._tree.heading(col, text=hd,
                                command=lambda c=col: self._sort_scan(c))
             self._tree.column(col, width=w, minwidth=max(w-20,30),
                               stretch=stretch, anchor=anchor)
-        self._sort_col  = None
-        self._sort_rev  = False
+        self._sort_col = None
+        self._sort_rev = False
 
         vsb = ttk.Scrollbar(tf, orient="vertical",   command=self._tree.yview)
         hsb = ttk.Scrollbar(tf, orient="horizontal", command=self._tree.xview)
@@ -792,8 +843,10 @@ class WBSystemCare(tk.Tk):
     # ── Página: Agendamento ───────────────────────────────────────────────────
 
     def _build_page_schedule(self):
-        p = tk.Frame(self._content, bg=C["bg"])
-        self._pages["schedule"] = p
+        outer = tk.Frame(self._content, bg=C["bg"])
+        self._pages["schedule"] = outer
+        scroll_outer, p = _scrollable_frame(outer)
+        scroll_outer.pack(fill="both", expand=True)
         _page_title(p, "🗓  Agendamento & Inicialização",
                     "Configure a execução periódica e o arranque automático com o Windows.")
 
@@ -941,8 +994,12 @@ class WBSystemCare(tk.Tk):
     # ── Página: Usuários ──────────────────────────────────────────────────────
 
     def _build_page_users(self):
-        p = tk.Frame(self._content, bg=C["bg"])
-        self._pages["users"] = p
+        outer = tk.Frame(self._content, bg=C["bg"])
+        self._pages["users"] = outer
+
+        # Scroll vertical — resolve o corte em resoluções baixas
+        scroll_outer, p = _scrollable_frame(outer)
+        scroll_outer.pack(fill="both", expand=True)
         _page_title(p, "👥  Gerenciamento de Usuários",
                     "Selecione um usuário, informe credenciais de admin e gerencie senhas e contas.")
 
@@ -1703,15 +1760,41 @@ class WBSystemCare(tk.Tk):
             self._set_running(True)
             self._update_step(1, "active")
             self._set_status("Varrendo pastas…")
-            # Varredura das pastas padrão do perfil
-            items = file_scanner.scan_profile_folders(lambda m: self._log_all(m))
-            # Inclui pastas extras adicionadas pelo usuário
-            extra = getattr(self, "_extra_folders", [])
-            for folder in extra:
-                self._log_all(f"📁 Escaneando pasta extra: {folder}")
+
+            items = []
+
+            # Pastas padrão filtradas pela seleção do usuário
+            folder_vars = getattr(self, "_scan_folder_vars", {})
+            from file_scanner import PROFILE_FOLDERS, resolve_special_folder, _make_item
+            import os
+
+            for key, label in PROFILE_FOLDERS:
+                # Se o usuário fez uma seleção, respeita; senão varre tudo
+                if folder_vars and not folder_vars.get(key, True):
+                    continue
+                path = resolve_special_folder(key)
+                if not os.path.isdir(path):
+                    continue
+                self._log_all(f"Escaneando {label}...")
+                try:
+                    entries = sorted(os.listdir(path),
+                                     key=lambda e: (not os.path.isdir(
+                                         os.path.join(path, e)), e.lower()))
+                    for entry in entries:
+                        full = os.path.join(path, entry)
+                        item = _make_item(full, path, label, key, depth=0)
+                        items.append(item)
+                    self._log_all(f"✔ {label}: {len(entries)} item(ns).")
+                except Exception as e:
+                    self._log_all(f"✘ {label}: {e}")
+
+            # Pastas extras selecionadas pelo usuário
+            for folder in getattr(self, "_extra_folders", []):
+                self._log_all(f"Escaneando pasta extra: {folder}")
                 extra_items = file_scanner.scan_single_folder(
                     folder, lambda m: self._log_all(m))
                 items.extend(extra_items)
+
             self._scan_items = items
             self._check_vars = {i: tk.BooleanVar(value=False) for i in range(len(items))}
             self.after(0, self._fill_tree)
@@ -1725,9 +1808,8 @@ class WBSystemCare(tk.Tk):
                 f"{summary['total_items']} itens  •  {summary['total_size']}"
             )
             self._log_all(
-                f"Varredura [{summary['username']}]: "
+                f"Varredura concluída [{summary['username']}]: "
                 f"{summary['total_items']} item(ns) / {summary['total_size']}"
-                + (f"  •  {len(extra)} pasta(s) extra(s)" if extra else "")
             )
             self.after(0, lambda: self._user_lbl.config(
                 text=f"👤 {summary['username']}"))
@@ -1735,37 +1817,32 @@ class WBSystemCare(tk.Tk):
         self._show_safe("scan")
 
     def _fill_tree(self):
-        """Preenche a Treeview com os itens escaneados (apenas itens raiz visíveis).
-        Pastas com filhos ganham um nó filho fictício '▶ expandir...' para mostrar a seta."""
+        """Preenche a Treeview em cascata nativa (col #0 = árvore com setas)."""
         for r in self._tree.get_children():
             self._tree.delete(r)
 
         for i, item in enumerate(self._scan_items):
-            depth  = item.get("depth", 0)
-            indent = "    " * depth
-            icon   = "📁 " if item["is_dir"] else "📄 "
-            nome_d = indent + icon + item["name"]
             sel_tag = "checked" if item.get("selected") else "unchecked"
-            fg_tag  = "depth_0" if depth == 0 else ("depth_1" if depth == 1 else "depth_2plus")
+            icon    = "📁" if item["is_dir"] else "📄"
+            iid     = str(i)
 
-            iid = str(i)
             self._tree.insert(
                 "", "end", iid=iid,
-                tags=(sel_tag, fg_tag),
+                text=f" {icon}  {item['name']}",   # coluna #0 — cascata nativa
+                tags=(sel_tag,),
+                open=item.get("expanded", False),
                 values=(
                     "☑" if item.get("selected") else "☐",
-                    nome_d,
                     item["type"],
                     item["size_str"],
                     item["modified"],
                     item["folder_label"],
-                    item["full_path"],
                 )
             )
-            # Adiciona nó filho fictício para pastas com conteúdo (mostra seta ▶)
+            # Pasta com conteúdo → placeholder para mostrar seta ▶
             if item["is_dir"] and item.get("has_children", False) and not item.get("expanded", False):
                 self._tree.insert(iid, "end", iid=f"_ph_{iid}",
-                                  values=("", "  ▶ clique para expandir...", "", "", "", "", ""))
+                                  text="  ⏳ expandindo...", values=("", "", "", "", ""))
 
         summary = file_scanner.get_summary(self._scan_items)
         sel_count = sum(1 for it in self._scan_items if it.get("selected"))
@@ -1775,57 +1852,65 @@ class WBSystemCare(tk.Tk):
         )
 
     def _expand_folder(self, iid: str):
-        """Expande uma pasta: carrega seus filhos como nós filhos na Treeview."""
-        idx = int(iid)
+        """Expande uma pasta inserindo filhos como nós filhos reais na árvore."""
+        try:
+            idx = int(iid)
+        except ValueError:
+            return
         if idx >= len(self._scan_items):
             return
         item = self._scan_items[idx]
         if not item["is_dir"] or item.get("expanded", False):
             return
 
-        # Marca como expandida
         item["expanded"] = True
 
-        # Remove o placeholder
+        # Remove placeholder
         ph = f"_ph_{iid}"
         if self._tree.exists(ph):
             self._tree.delete(ph)
 
-        # Carrega filhos
+        # Carrega filhos via file_scanner
         child_depth = item.get("depth", 0) + 1
         children = file_scanner.scan_folder_children(
             item["full_path"],
             item["folder_label"],
             item["folder_key"],
             child_depth,
-            lambda m: self._log_all(m)
+            lambda m: None  # silencioso
         )
 
-        # Insere os filhos no índice global
+        if not children:
+            item["has_children"] = False
+            return
+
         base = len(self._scan_items)
         self._scan_items.extend(children)
         for j in range(base, len(self._scan_items)):
             self._check_vars[j] = tk.BooleanVar(value=False)
 
         for j, child in enumerate(children):
-            ci  = base + j
-            dep = child.get("depth", child_depth)
-            ind = "    " * dep
-            ico = "📁 " if child["is_dir"] else "📄 "
-            nom = ind + ico + child["name"]
+            ci   = base + j
             ciid = str(ci)
+            icon = "📁" if child["is_dir"] else "📄"
             self._tree.insert(
                 iid, "end", iid=ciid,
-                tags=("unchecked", "depth_1" if dep == 1 else "depth_2plus"),
+                text=f" {icon}  {child['name']}",
+                tags=("unchecked",),
+                open=False,
                 values=(
-                    "☐", nom, child["type"], child["size_str"],
-                    child["modified"], child["folder_label"], child["full_path"]
+                    "☐",
+                    child["type"],
+                    child["size_str"],
+                    child["modified"],
+                    child["folder_label"],
                 )
             )
-            # Sub-pasta com filhos → adiciona placeholder
+            # Sub-pasta com filhos → placeholder
             if child["is_dir"] and child.get("has_children", False):
                 self._tree.insert(ciid, "end", iid=f"_ph_{ciid}",
-                                  values=("", "  ▶ clique para expandir...", "", "", "", "", ""))
+                                  text="  ⏳ expandindo...",
+                                  values=("", "", "", "", ""))
 
     def _collapse_folder(self, iid: str):
         """Recolhe uma pasta: remove todos os filhos e marca como não expandida."""
@@ -2003,13 +2088,11 @@ class WBSystemCare(tk.Tk):
             self._sort_rev = False
 
         col_map = {
-            "sel":        lambda i: i.get("selected", False),
             "nome":       lambda i: i["name"].lower(),
             "tipo":       lambda i: i["type"].lower(),
             "tamanho":    lambda i: i["size_bytes"],
             "modificado": lambda i: i["modified"],
             "pasta":      lambda i: i.get("folder_label","").lower(),
-            "caminho":    lambda i: i["full_path"].lower(),
         }
         key_fn = col_map.get(col, lambda i: i["name"].lower())
         self._scan_items.sort(key=key_fn, reverse=self._sort_rev)
@@ -2019,17 +2102,20 @@ class WBSystemCare(tk.Tk):
         # Atualiza seta no cabeçalho
         arrow = " ▼" if self._sort_rev else " ▲"
         col_labels = {
-            "sel":"✔","nome":"Nome","tipo":"Tipo","tamanho":"Tamanho",
-            "modificado":"Modificado","pasta":"Pasta Raiz","caminho":"Caminho Completo"
+            "nome":"Nome / Caminho","tipo":"Tipo","tamanho":"Tamanho",
+            "modificado":"Modificado","pasta":"Pasta Raiz"
         }
         for c, lbl in col_labels.items():
-            self._tree.heading(c, text=lbl + (arrow if c == col else ""),
-                               command=lambda cc=c: self._sort_scan(cc))
+            if c == "nome":
+                self._tree.heading("#0", text=lbl + (arrow if c == col else ""),
+                                   command=lambda: self._sort_scan("nome"))
+            else:
+                self._tree.heading(c, text=lbl + (arrow if c == col else ""),
+                                   command=lambda cc=c: self._sort_scan(cc))
         self._fill_tree()
 
     def _toggle_items(self, _=None):
         for iid in self._tree.selection():
-            # Ignora placeholders de expansão
             if iid.startswith("_ph_"):
                 continue
             try:
@@ -2043,19 +2129,17 @@ class WBSystemCare(tk.Tk):
             self._scan_items[idx]["selected"] = new
             self._check_vars[idx].set(new)
 
-            it     = self._scan_items[idx]
-            depth  = it.get("depth", 0)
-            indent = "    " * depth
-            nome_d = indent + ("📁 " if it["is_dir"] else "📄 ") + it["name"]
-            tag_d  = "depth_0" if depth==0 else ("depth_1" if depth==1 else "depth_2plus")
+            it   = self._scan_items[idx]
+            icon = "📁" if it["is_dir"] else "📄"
             if self._tree.exists(iid):
                 self._tree.item(iid,
-                                tags=("checked" if new else "unchecked", tag_d),
-                                values=("☑" if new else "☐", nome_d, it["type"],
+                                text=f" {icon}  {it['name']}",
+                                tags=("checked" if new else "unchecked",),
+                                values=("☑" if new else "☐", it["type"],
                                         it["size_str"], it["modified"],
-                                        it["folder_label"], it["full_path"]))
+                                        it["folder_label"]))
 
-            # Se for pasta, propaga a seleção para todos os filhos carregados
+            # Propaga para filhos carregados
             if it["is_dir"] and it.get("expanded", False):
                 parent_path = it["full_path"]
                 for j, child in enumerate(self._scan_items):
@@ -2067,87 +2151,338 @@ class WBSystemCare(tk.Tk):
                             child["selected"] = new
                             if j in self._check_vars:
                                 self._check_vars[j].set(new)
-                            dep = child.get("depth", 0)
-                            ind = "    " * dep
-                            nom = ind + ("📁 " if child["is_dir"] else "📄 ") + child["name"]
-                            tg  = "depth_0" if dep==0 else ("depth_1" if dep==1 else "depth_2plus")
+                            cico = "📁" if child["is_dir"] else "📄"
                             ciid = str(j)
                             if self._tree.exists(ciid):
                                 self._tree.item(ciid,
-                                                tags=("checked" if new else "unchecked", tg),
-                                                values=("☑" if new else "☐", nom,
-                                                        child["type"], child["size_str"],
-                                                        child["modified"], child["folder_label"],
-                                                        child["full_path"]))
+                                                text=f" {cico}  {child['name']}",
+                                                tags=("checked" if new else "unchecked",),
+                                                values=("☑" if new else "☐", child["type"],
+                                                        child["size_str"], child["modified"],
+                                                        child["folder_label"]))
                     except Exception:
                         pass
 
-        # Atualiza contador
         sel_count = sum(1 for it in self._scan_items if it.get("selected"))
         if self._scan_items:
             summary = file_scanner.get_summary(self._scan_items)
             self._scan_sum_lbl.config(
-                text=f"{summary['total_items']} itens  •  {sel_count} selecionado(s)")
+                text=f"{summary['total_items']} itens  •  {summary['total_size']}"
+                     + (f"  •  {sel_count} selecionado(s)" if sel_count else ""))
 
     def _sel_all(self):
         for i, item in enumerate(self._scan_items):
             item["selected"] = True
             if i in self._check_vars: self._check_vars[i].set(True)
             if self._tree.exists(str(i)):
-                dep = item.get("depth", 0)
-                ind = "    " * dep
-                nom = ind + ("📁 " if item["is_dir"] else "📄 ") + item["name"]
-                self._tree.item(str(i), tags=("checked",),
-                                values=("☑", nom, item["type"], item["size_str"],
-                                        item["modified"], item["folder_label"], item["full_path"]))
+                icon = "📁" if item["is_dir"] else "📄"
+                self._tree.item(str(i),
+                                text=f" {icon}  {item['name']}",
+                                tags=("checked",),
+                                values=("☑", item["type"], item["size_str"],
+                                        item["modified"], item["folder_label"]))
         sel_count = len(self._scan_items)
-        summary = file_scanner.get_summary(self._scan_items)
-        self._scan_sum_lbl.config(
-            text=f"{summary['total_items']} itens  •  {sel_count} selecionado(s)")
+        if self._scan_items:
+            summary = file_scanner.get_summary(self._scan_items)
+            self._scan_sum_lbl.config(
+                text=f"{summary['total_items']} itens  •  {sel_count} selecionado(s)")
 
     def _desel_all(self):
         for i, item in enumerate(self._scan_items):
             item["selected"] = False
             if i in self._check_vars: self._check_vars[i].set(False)
             if self._tree.exists(str(i)):
-                dep = item.get("depth", 0)
-                ind = "    " * dep
-                nom = ind + ("📁 " if item["is_dir"] else "📄 ") + item["name"]
-                self._tree.item(str(i), tags=("unchecked",),
-                                values=("☐", nom, item["type"], item["size_str"],
-                                        item["modified"], item["folder_label"], item["full_path"]))
-        summary = file_scanner.get_summary(self._scan_items)
-        self._scan_sum_lbl.config(text=f"{summary['total_items']} itens  •  0 selecionado(s)")
+                icon = "📁" if item["is_dir"] else "📄"
+                self._tree.item(str(i),
+                                text=f" {icon}  {item['name']}",
+                                tags=("unchecked",),
+                                values=("☐", item["type"], item["size_str"],
+                                        item["modified"], item["folder_label"]))
+        if self._scan_items:
+            summary = file_scanner.get_summary(self._scan_items)
+            self._scan_sum_lbl.config(text=f"{summary['total_items']} itens  •  0 selecionado(s)")
 
-    def _add_folder(self):
+    def _choose_folders_to_scan(self):
         """
-        Adiciona uma pasta extra à fila de varredura.
-        Pode ser chamado ANTES de escanear (adiciona à lista de pastas pendentes)
-        ou DEPOIS (escaneia e adiciona imediatamente ao resultado).
+        Janela modal CENTRALIZADA no programa principal para escolher pastas.
+        Bloqueia a janela principal até o usuário clicar OK ou Cancelar.
         """
-        folder = filedialog.askdirectory(title="Selecionar pasta adicional para varredura")
-        if not folder: return
+        from file_scanner import PROFILE_FOLDERS, resolve_special_folder
+        import os
 
-        # Guarda para usar no próximo scan
+        # ── Cria janela modal ────────────────────────────────────────────
+        win = tk.Toplevel(self)
+        win.title("Escolher Pastas para Varrer")
+        win.configure(bg=C["bg"])
+        win.transient(self)          # filho da janela principal
+        win.grab_set()               # bloqueia interação com o pai
+        win.resizable(False, False)
+
+        WIN_W, WIN_H = 500, 520
+
+        # Centraliza sobre a janela principal
+        self.update_idletasks()
+        px = self.winfo_rootx() + (self.winfo_width()  - WIN_W) // 2
+        py = self.winfo_rooty() + (self.winfo_height() - WIN_H) // 2
+        px = max(0, px)
+        py = max(0, py)
+        win.geometry(f"{WIN_W}x{WIN_H}+{px}+{py}")
+
+        # ── Cabeçalho ────────────────────────────────────────────────────
+        hdr = tk.Frame(win, bg=C["bg_header"])
+        hdr.pack(fill="x")
+        tk.Frame(hdr, bg=C["accent"], height=3).pack(fill="x")
+        tk.Label(hdr, text="📂  Escolher Pastas para Varrer",
+                 bg=C["bg_header"], fg=C["accent"],
+                 font=("Segoe UI", 12, "bold")).pack(anchor="w", padx=16, pady=(12,2))
+        tk.Label(hdr, text="Marque as pastas que deseja incluir. Clique OK para confirmar.",
+                 bg=C["bg_header"], fg=C["text_dim"],
+                 font=FONT_SMALL).pack(anchor="w", padx=16, pady=(0,10))
+
+        # ── Lista de pastas ───────────────────────────────────────────────
+        list_frame = tk.Frame(win, bg=C["bg_card"])
+        list_frame.pack(fill="both", expand=True, padx=16, pady=(0,0))
+
+        # Inicializa estado anterior
+        if not hasattr(self, "_scan_folder_vars"):
+            self._scan_folder_vars = {}
         if not hasattr(self, "_extra_folders"):
             self._extra_folders = []
-        if folder not in self._extra_folders:
-            self._extra_folders.append(folder)
-            self._log_all(f"📁 Pasta adicionada à fila: {folder}")
-            self._set_status(f"Pasta '{folder}' adicionada. Clique em 'Escanear Agora'.")
 
-        # Se já tem itens escaneados, escaneia imediatamente também
+        folder_vars = {}
+        for key, label in PROFILE_FOLDERS:
+            path   = resolve_special_folder(key)
+            exists = os.path.isdir(path)
+            prev   = self._scan_folder_vars.get(key, True)
+            var    = tk.BooleanVar(value=prev and exists)
+            folder_vars[key] = (var, label)
+
+            row = tk.Frame(list_frame, bg=C["bg_card"])
+            row.pack(fill="x", padx=8, pady=2)
+
+            tk.Checkbutton(
+                row, variable=var,
+                text=f"  {label}",
+                bg=C["bg_card"],
+                fg=C["text"] if exists else C["text_muted"],
+                activebackground=C["bg_card"],
+                selectcolor=C["accent_dim"],
+                relief="flat",
+                cursor="hand2" if exists else "arrow",
+                font=FONT_BODY,
+                state="normal" if exists else "disabled",
+                width=18, anchor="w"
+            ).pack(side="left")
+
+            short = path if len(path) <= 42 else "…" + path[-39:]
+            tk.Label(row, text=short, bg=C["bg_card"],
+                     fg=C["text_muted"], font=FONT_TINY).pack(side="right", padx=4)
+
+        # Separador + pastas extras
+        if self._extra_folders:
+            tk.Frame(list_frame, bg=C["border"], height=1).pack(fill="x", padx=8, pady=4)
+            for fp in self._extra_folders:
+                ev  = tk.BooleanVar(value=True)
+                folder_vars[f"_extra_{fp}"] = (ev, os.path.basename(fp))
+                er  = tk.Frame(list_frame, bg=C["bg_card"])
+                er.pack(fill="x", padx=8, pady=2)
+                tk.Checkbutton(er, variable=ev, text=f"  📁 {fp}",
+                               bg=C["bg_card"], fg=C["accent"],
+                               activebackground=C["bg_card"],
+                               selectcolor=C["accent_dim"],
+                               relief="flat", cursor="hand2",
+                               font=FONT_SMALL).pack(side="left")
+
+        # ── Botão adicionar pasta extra ───────────────────────────────────
+        add_f = tk.Frame(win, bg=C["bg"])
+        add_f.pack(fill="x", padx=16, pady=4)
+
+        def _add_extra():
+            folder = filedialog.askdirectory(title="Adicionar pasta extra", parent=win)
+            if folder and folder not in self._extra_folders:
+                self._extra_folders.append(folder)
+                ev  = tk.BooleanVar(value=True)
+                folder_vars[f"_extra_{folder}"] = (ev, os.path.basename(folder))
+                er  = tk.Frame(list_frame, bg=C["bg_card"])
+                er.pack(fill="x", padx=8, pady=2)
+                tk.Checkbutton(er, variable=ev, text=f"  📁 {folder}",
+                               bg=C["bg_card"], fg=C["accent"],
+                               activebackground=C["bg_card"],
+                               selectcolor=C["accent_dim"],
+                               relief="flat", cursor="hand2",
+                               font=FONT_SMALL).pack(side="left")
+
+        tk.Button(add_f, text="➕  Adicionar pasta extra…",
+                  font=FONT_SMALL, bg=C["bg_card"], fg=C["text_dim"],
+                  activebackground=C["border"], relief="flat",
+                  cursor="hand2", command=_add_extra).pack(side="left")
+
+        # ── Barra de botões OK / Cancelar ─────────────────────────────────
+        btn_bar = tk.Frame(win, bg=C["bg_header"])
+        btn_bar.pack(fill="x", side="bottom")
+        tk.Frame(btn_bar, bg=C["accent"], height=2).pack(fill="x")
+        bi = tk.Frame(btn_bar, bg=C["bg_header"])
+        bi.pack(fill="x", padx=16, pady=10)
+
+        def _sel_all_f():
+            for v, _ in folder_vars.values(): v.set(True)
+
+        def _none_f():
+            for v, _ in folder_vars.values(): v.set(False)
+
+        def _ok():
+            # Salva seleção das pastas padrão
+            self._scan_folder_vars = {}
+            for k, (v, lbl) in folder_vars.items():
+                if not k.startswith("_extra_"):
+                    self._scan_folder_vars[k] = v.get()
+
+            # Atualiza extras
+            self._extra_folders = [
+                k.replace("_extra_", "", 1)
+                for k, (v, _) in folder_vars.items()
+                if k.startswith("_extra_") and v.get()
+            ]
+
+            # Monta resumo para o label
+            sel = [lbl for k, (v, lbl) in folder_vars.items()
+                   if not k.startswith("_extra_") and v.get()]
+            n_extra = len(self._extra_folders)
+            if len(sel) == len(PROFILE_FOLDERS) and n_extra == 0:
+                txt = "Todas as pastas do perfil (padrão)"
+            elif not sel and not n_extra:
+                txt = "⚠ Nenhuma pasta selecionada"
+            else:
+                txt = ", ".join(sel[:3])
+                if len(sel) > 3: txt += f" +{len(sel)-3}"
+                if n_extra:     txt += f"  +{n_extra} extra(s)"
+
+            self._chosen_folders_lbl.config(text=txt, fg=C["accent"])
+            self._log_all(f"📂 Configurado para varrer: {txt}")
+            win.destroy()
+
+        def _cancel():
+            win.destroy()
+
+        tk.Button(bi, text="Marcar Tudo",  font=FONT_SMALL, bg=C["bg_card"],
+                  fg=C["text_dim"], relief="flat", cursor="hand2",
+                  command=_sel_all_f).pack(side="left", padx=(0,6))
+        tk.Button(bi, text="Desmarcar",    font=FONT_SMALL, bg=C["bg_card"],
+                  fg=C["text_dim"], relief="flat", cursor="hand2",
+                  command=_none_f).pack(side="left", padx=(0,16))
+        _btn(bi, "✘  Cancelar", _cancel, "danger", width=12).pack(side="right", padx=(6,0))
+        _btn(bi, "✔  OK — Confirmar",  _ok, width=20).pack(side="right")
+
+        # Bloqueia até fechar
+        win.wait_window()
+
+    def _scan_clear(self):
+        """Limpa os resultados e recomeça do zero."""
+        if self._running:
+            messagebox.showwarning("Em andamento", "Aguarde a operação atual terminar."); return
         if self._scan_items:
-            def task():
-                self._set_running(True)
-                items = file_scanner.scan_single_folder(folder, lambda m: self._log_all(m))
-                base = len(self._scan_items)
-                self._scan_items.extend(items)
-                for i in range(base, len(self._scan_items)):
-                    self._check_vars[i] = tk.BooleanVar(value=False)
-                self.after(0, self._fill_tree)
-                self._set_running(False, f"✔ {len(items)} itens adicionados")
-            threading.Thread(target=task, daemon=True).start()
+            if not messagebox.askyesno("Limpar varredura",
+                    "Limpar os resultados da varredura e recomeçar?\n\n"
+                    "As pastas selecionadas para varrer serão mantidas."): return
+        # Limpa a Treeview e o estado
+        for r in self._tree.get_children():
+            self._tree.delete(r)
+        self._scan_items = []
+        self._check_vars = {}
+        self._scan_sum_lbl.config(text="Nenhuma varredura realizada.")
+        self._set_status("Varredura limpa. Pronto para novo scan.")
+        self._log_all("🔄 Varredura limpa. Configure as pastas e clique em 'Escanear'.")
+        # Reseta etapas
+        self._update_step(1, "pending")
+        self._update_step(2, "pending")
+        self._update_step(3, "pending")
+
+    def _add_folder(self):
+        """Atalho rápido — abre o diálogo de escolha de pastas."""
+        self._choose_folders_to_scan()
+
+    def _sel_by_folder(self):
+        """Janela para MARCAR para exclusão apenas itens de certas pastas (após varredura)."""
+        if not self._scan_items:
+            messagebox.showinfo("Sem itens",
+                                "Execute a varredura primeiro antes de selecionar por pasta."); return
+
+        folders = sorted(set(it.get("folder_label","—") for it in self._scan_items))
+
+        win = tk.Toplevel(self)
+        win.title("Selecionar por Pasta")
+        win.configure(bg=C["bg"])
+        win.transient(self)
+        win.grab_set()
+        win.resizable(False, False)
+
+        sw = win.winfo_screenwidth()
+        win.geometry(f"{min(420, sw-80)}x360")
+
+        _page_title(win, "📋  Selecionar por Pasta",
+                    "Marque as pastas cujos itens devem ser marcados para exclusão.")
+
+        fc = _card(win)
+        fc.pack(fill="both", expand=True, padx=16, pady=(0,8))
+        tk.Frame(fc, bg=C["danger"], height=2).pack(fill="x")
+        fi = tk.Frame(fc, bg=C["bg_card"])
+        fi.pack(fill="x", padx=12, pady=8)
+
+        vars_map = {}
+        for folder in folders:
+            count = sum(1 for it in self._scan_items if it.get("folder_label") == folder)
+            sz    = file_scanner._get_size_str(
+                sum(it["size_bytes"] for it in self._scan_items
+                    if it.get("folder_label") == folder))
+            var = tk.BooleanVar(value=False)
+            vars_map[folder] = var
+            row = tk.Frame(fi, bg=C["bg_card"])
+            row.pack(fill="x", pady=2)
+            tk.Checkbutton(
+                row, variable=var, text=f"  {folder}",
+                bg=C["bg_card"], fg=C["text"], font=FONT_BODY,
+                activebackground=C["bg_card"], selectcolor=C["accent_dim"],
+                relief="flat", cursor="hand2"
+            ).pack(side="left")
+            tk.Label(row, text=f"{count} item(ns)  •  {sz}",
+                     bg=C["bg_card"], fg=C["text_dim"],
+                     font=FONT_TINY).pack(side="right", padx=4)
+
+        def _apply():
+            sel_folders = {f for f, v in vars_map.items() if v.get()}
+            if not sel_folders:
+                messagebox.showwarning("Nenhuma pasta",
+                                       "Selecione ao menos uma pasta.", parent=win); return
+            # Marca itens das pastas escolhidas, desmarca as demais
+            for i, item in enumerate(self._scan_items):
+                in_sel = item.get("folder_label") in sel_folders
+                item["selected"] = in_sel
+                if i in self._check_vars:
+                    self._check_vars[i].set(in_sel)
+                if self._tree.exists(str(i)):
+                    icon = "📁" if item["is_dir"] else "📄"
+                    self._tree.item(str(i),
+                                    text=f" {icon}  {item['name']}",
+                                    tags=("checked" if in_sel else "unchecked",),
+                                    values=("☑" if in_sel else "☐", item["type"],
+                                            item["size_str"], item["modified"],
+                                            item["folder_label"]))
+            sel_count = sum(1 for it in self._scan_items if it.get("selected"))
+            self._scan_sum_lbl.config(
+                text=f"{len(self._scan_items)} itens  •  {sel_count} selecionado(s)")
+            win.destroy()
+
+        btn_bar = tk.Frame(win, bg=C["bg_header"])
+        btn_bar.pack(fill="x", side="bottom")
+        tk.Frame(btn_bar, bg=C["accent"], height=1).pack(fill="x")
+        bi = tk.Frame(btn_bar, bg=C["bg_header"])
+        bi.pack(fill="x", padx=16, pady=10)
+        tk.Button(bi, text="Marcar Tudo", font=FONT_SMALL, bg=C["bg_card"],
+                  fg=C["text_dim"], relief="flat", cursor="hand2",
+                  command=lambda: [v.set(True) for v in vars_map.values()]
+                  ).pack(side="left", padx=(0,6))
+        _btn(bi, "✘  Cancelar", win.destroy, "danger", width=12).pack(side="right", padx=(6,0))
+        _btn(bi, "✔  Aplicar Seleção", _apply, width=20).pack(side="right")
 
     def _run_delete(self):
         if self._running: return
