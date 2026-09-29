@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>W.B. SystemCare — Usina da Paz Salinópolis</title>
+  <meta name="description" content="Ferramenta de restauração e limpeza para laboratórios de informática. Desenvolvido por Waldemir (@romeuwb) para a Usina da Paz Salinópolis." />
+  <style>
+    :root {
+      --bg:        #17140f;
+      --bg2:       #211d16;
+      --bg3:       #2a2318;
+      --accent:    #d4982e;
+      --accent2:   #f0b840;
+      --blue:      #4a8fd4;
+      --success:   #5cb85c;
+      --danger:    #d9534f;
+      --text:      #f5ede0;
+      --text2:     #b8a888;
+      --text3:     #6a5e4a;
+      --border:    #3a3028;
+      --radius:    10px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', Arial, sans-serif;
+      line-height: 1.6;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { color: var(--accent2); }
+
+    /* ── Header ── */
+    header {
+      background: linear-gradient(135deg, #0d0b09 0%, #1a1612 50%, #211d16 100%);
+      border-bottom: 3px solid var(--accent);
+      padding: 0;
+    }
+    .header-inner {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 48px 24px 56px;
+      display: flex;
+      align-items: center;
+      gap: 36px;
+    }
+    .logo-box {
+      width: 80px; height: 80px;
+      background: var(--bg2);
+      border: 2px solid var(--accent);
+      border-radius: 16px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 40px;
+      flex-shrink: 0;
+    }
+    .header-text h1 {
+      font-size: 2.4rem;
+      font-weight: 800;
+      color: var(--accent);
+      letter-spacing: -0.5px;
+    }
+    .header-text p {
+      color: var(--text2);
+      font-size: 1rem;
+      margin-top: 6px;
+    }
+    .badge {
+      display: inline-block;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 3px 12px;
+      font-size: 0.8rem;
+      color: var(--text2);
+      margin-top: 10px;
+      margin-right: 6px;
+    }
+    .badge.green { border-color: var(--success); color: var(--success); }
+    .badge.blue  { border-color: var(--blue);    color: var(--blue);    }
+
+    /* ── Download CTA ── */
+    .cta-bar {
+      background: var(--bg2);
+      border-bottom: 1px solid var(--border);
+      padding: 20px 24px;
+    }
+    .cta-inner {
+      max-width: 1100px; margin: 0 auto;
+      display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    }
+    .btn-download {
+      display: inline-flex; align-items: center; gap: 10px;
+      background: var(--accent);
+      color: #0d0b09;
+      font-weight: 800;
+      font-size: 1.05rem;
+      padding: 14px 28px;
+      border-radius: var(--radius);
+      border: none;
+      cursor: pointer;
+      transition: background 0.2s;
+      text-decoration: none;
+    }
+    .btn-download:hover { background: var(--accent2); color: #0d0b09; }
+    .btn-gh {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: var(--bg3);
+      color: var(--text2);
+      padding: 12px 22px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      font-size: 0.95rem;
+      transition: border-color 0.2s, color 0.2s;
+    }
+    .btn-gh:hover { border-color: var(--accent); color: var(--accent); }
+    .cta-note {
+      color: var(--text3);
+      font-size: 0.85rem;
+    }
+
+    /* ── Layout ── */
+    .container { max-width: 1100px; margin: 0 auto; padding: 56px 24px; }
+
+    /* ── Section title ── */
+    .section-title {
+      font-size: 1.5rem; font-weight: 700;
+      color: var(--accent);
+      margin-bottom: 28px;
+      padding-bottom: 10px;
+      border-bottom: 2px solid var(--border);
+      display: flex; align-items: center; gap: 10px;
+    }
+
+    /* ── Feature grid ── */
+    .features {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 20px;
+      margin-bottom: 60px;
+    }
+    .feature-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-top: 3px solid var(--accent);
+      border-radius: var(--radius);
+      padding: 24px;
+      transition: border-color 0.2s, transform 0.15s;
+    }
+    .feature-card:hover {
+      border-color: var(--accent);
+      transform: translateY(-2px);
+    }
+    .feature-icon {
+      font-size: 2rem; margin-bottom: 12px;
+    }
+    .feature-card h3 {
+      color: var(--accent);
+      font-size: 1.05rem;
+      margin-bottom: 8px;
+    }
+    .feature-card ul {
+      list-style: none;
+      padding: 0;
+    }
+    .feature-card ul li {
+      color: var(--text2);
+      font-size: 0.9rem;
+      padding: 3px 0;
+    }
+    .feature-card ul li::before {
+      content: "→ ";
+      color: var(--accent);
+      font-size: 0.8rem;
+    }
+
+    /* ── How it works ── */
+    .steps {
+      display: flex;
+      gap: 0;
+      margin-bottom: 60px;
+      flex-wrap: wrap;
+    }
+    .step {
+      flex: 1; min-width: 200px;
+      padding: 24px;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      position: relative;
+      text-align: center;
+    }
+    .step:not(:last-child)::after {
+      content: "→";
+      position: absolute;
+      right: -14px; top: 50%;
+      transform: translateY(-50%);
+      color: var(--accent);
+      font-size: 1.4rem;
+      z-index: 1;
+    }
+    .step:first-child { border-radius: var(--radius) 0 0 var(--radius); }
+    .step:last-child  { border-radius: 0 var(--radius) var(--radius) 0; }
+    .step-num {
+      width: 36px; height: 36px;
+      background: var(--accent);
+      color: #0d0b09;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 800; font-size: 1rem;
+      margin: 0 auto 12px;
+    }
+    .step h4 { color: var(--text); font-size: 0.95rem; margin-bottom: 6px; }
+    .step p  { color: var(--text2); font-size: 0.82rem; }
+
+    /* ── Info box ── */
+    .info-box {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--blue);
+      border-radius: var(--radius);
+      padding: 20px 24px;
+      margin-bottom: 40px;
+      color: var(--text2);
+      font-size: 0.9rem;
+      line-height: 1.7;
+    }
+    .info-box strong { color: var(--text); }
+
+    /* ── Update section ── */
+    .update-box {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-top: 3px solid var(--success);
+      border-radius: var(--radius);
+      padding: 28px;
+      margin-bottom: 60px;
+      display: flex; gap: 28px; align-items: flex-start; flex-wrap: wrap;
+    }
+    .update-box .icon { font-size: 2.8rem; flex-shrink: 0; }
+    .update-box h3 { color: var(--success); margin-bottom: 8px; font-size: 1.1rem; }
+    .update-box p  { color: var(--text2); font-size: 0.9rem; line-height: 1.7; }
+
+    /* ── Footer ── */
+    footer {
+      background: var(--bg2);
+      border-top: 1px solid var(--border);
+      padding: 32px 24px;
+      text-align: center;
+      color: var(--text3);
+      font-size: 0.85rem;
+    }
+    footer a { color: var(--accent); }
+    footer .footer-logo {
+      font-size: 1.2rem; font-weight: 700;
+      color: var(--accent);
+      margin-bottom: 8px;
+    }
+
+    /* ── Responsive ── */
+    @media (max-width: 640px) {
+      .header-inner { flex-direction: column; text-align: center; }
+      .header-text h1 { font-size: 1.8rem; }
+      .step:not(:last-child)::after { display: none; }
+      .step { border-radius: var(--radius) !important; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ══ HEADER ══════════════════════════════════════════════════════════════ -->
+<header>
+  <div class="header-inner">
+    <div class="logo-box">🖥</div>
+    <div class="header-text">
+      <h1>W.B. SystemCare</h1>
+      <p>Ferramenta de restauração e limpeza para laboratórios de informática</p>
+      <p style="margin-top:4px;color:#6a5e4a;font-size:0.88rem;">
+        Usina da Paz Salinópolis — Sala de Tecnologia
+      </p>
+      <div style="margin-top:12px;">
+        <span class="badge green">✔ Windows 10 / 11</span>
+        <span class="badge">v1.5</span>
+        <span class="badge blue">Sem instalação</span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- ══ CTA DOWNLOAD ═════════════════════════════════════════════════════════ -->
+<div class="cta-bar">
+  <div class="cta-inner">
+    <a class="btn-download"
+       href="https://github.com/romeuwb/wb-systemcare/releases/latest/download/WB_SystemCare.exe">
+      ⬇&nbsp; Baixar WB_SystemCare.exe
+    </a>
+    <a class="btn-gh"
+       href="https://github.com/romeuwb/wb-systemcare/releases">
+      📋&nbsp; Ver todas as versões
+    </a>
+    <a class="btn-gh"
+       href="https://github.com/romeuwb/wb-systemcare">
+      <svg height="18" viewBox="0 0 16 16" fill="currentColor" style="vertical-align:middle">
+        <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+          0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13
+          -.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66
+          .07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15
+          -.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27
+          .68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12
+          .51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48
+          0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+      </svg>&nbsp; GitHub
+    </a>
+    <span class="cta-note">Apenas 17 MB · Sem instalação · Windows 10/11</span>
+  </div>
+</div>
+
+<!-- ══ FUNCIONALIDADES ══════════════════════════════════════════════════════ -->
+<div class="container">
+  <div class="section-title">🛠 Funcionalidades</div>
+  <div class="features">
+
+    <div class="feature-card">
+      <div class="feature-icon">🎨</div>
+      <h3>Personalização do Windows</h3>
+      <ul>
+        <li>Papel de parede padrão (Windows claro)</li>
+        <li>Proteção de tela desativada</li>
+        <li>Tela de bloqueio restaurada (Spotlight)</li>
+        <li>Ponteiros Aero no tamanho padrão</li>
+        <li>Cores e modo claro automáticos</li>
+        <li>Histórico de navegação limpo</li>
+        <li>Lixeira esvaziada</li>
+      </ul>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon">🔍</div>
+      <h3>Varredura de Arquivos</h3>
+      <ul>
+        <li>Visualização em cascata (hierárquica)</li>
+        <li>Escolha quais pastas varrer</li>
+        <li>Expande/recolhe subpastas</li>
+        <li>Seleciona por pasta ou individualmente</li>
+        <li>Exclusão permanente dos itens marcados</li>
+      </ul>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon">⚡</div>
+      <h3>Automação Completa</h3>
+      <ul>
+        <li>Restaura tema + varre + exclui em 1 clique</li>
+        <li>Confirmação opcional antes de excluir</li>
+        <li>Modo totalmente automático</li>
+      </ul>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon">🗓</div>
+      <h3>Agendamento</h3>
+      <ul>
+        <li>Inicialização automática com o Windows</li>
+        <li>Para todos os perfis ou só o atual</li>
+        <li>Limpeza periódica a cada X dias</li>
+        <li>Executa em segundo plano (tray)</li>
+      </ul>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon">👥</div>
+      <h3>Gerenciamento de Usuários</h3>
+      <ul>
+        <li>Lista usuários locais com status</li>
+        <li>Altera senha e nome completo</li>
+        <li>Configura expiração de senha</li>
+        <li>Ativa ou desativa contas</li>
+        <li>Suporte a credenciais de admin</li>
+      </ul>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon">🔄</div>
+      <h3>Atualização Automática</h3>
+      <ul>
+        <li>Verifica novas versões no GitHub</li>
+        <li>Download direto dentro do programa</li>
+        <li>Substitui e reinicia automaticamente</li>
+        <li>Sem necessidade de reinstalar</li>
+      </ul>
+    </div>
+
+  </div>
+
+  <!-- ══ COMO USAR ══════════════════════════════════════════════════════════ -->
+  <div class="section-title">📋 Como Usar</div>
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">1</div>
+      <h4>Baixar</h4>
+      <p>Clique no botão de download acima e salve o WB_SystemCare.exe</p>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <h4>Executar</h4>
+      <p>Dê duplo clique no arquivo — não precisa instalar nada</p>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <h4>Personalizar</h4>
+      <p>Escolha as pastas e opções que deseja restaurar ou limpar</p>
+    </div>
+    <div class="step">
+      <div class="step-num">4</div>
+      <h4>Limpar</h4>
+      <p>Clique em Escanear, marque os itens e exclua o que não precisa</p>
+    </div>
+  </div>
+
+  <!-- ══ AUTO-UPDATE ════════════════════════════════════════════════════════ -->
+  <div class="update-box">
+    <div class="icon">🔄</div>
+    <div>
+      <h3>Atualização Automática</h3>
+      <p>
+        Quando uma nova versão é lançada, o programa detecta automaticamente.<br>
+        Basta clicar em <strong>"⬇ Baixar Nova Versão"</strong> na aba Atualização —
+        o programa faz o download, substitui o arquivo atual e reinicia sozinho.<br>
+        <strong>Não é preciso baixar manualmente nem reinstalar.</strong>
+      </p>
+    </div>
+  </div>
+
+  <!-- ══ INFO ═══════════════════════════════════════════════════════════════ -->
+  <div class="info-box">
+    <strong>🎓 Contexto de uso:</strong> Desenvolvido para laboratórios de informática
+    com cursos de 5 a 14 dias. Ao final de cada curso, o programa restaura o computador
+    para o estado padrão e remove os arquivos dos alunos, preparando a máquina para a
+    próxima turma — sem precisar reinstalar o Windows.
+    <br><br>
+    <strong>🔐 Segurança:</strong> Opera exclusivamente no perfil do usuário que está
+    executando o programa. Não afeta outros usuários nem arquivos do sistema.
+  </div>
+
+</div>
+
+<!-- ══ FOOTER ════════════════════════════════════════════════════════════════ -->
+<footer>
+  <div class="footer-logo">🖥 W.B. SystemCare</div>
+  <p>
+    Desenvolvido por <a href="https://github.com/romeuwb">Waldemir (@romeuwb)</a>
+    &nbsp;·&nbsp;
+    <a href="https://github.com/romeuwb/wb-systemcare">GitHub</a>
+    &nbsp;·&nbsp;
+    <a href="https://github.com/romeuwb/wb-systemcare/releases">Releases</a>
+  </p>
+  <p style="margin-top:8px;">Usina da Paz Salinópolis — Sala de Tecnologia</p>
+  <p style="margin-top:8px;font-size:0.78rem;">
+    Windows 10 / 11 · Sem instalação · Código aberto
+  </p>
+</footer>
+
+</body>
+</html>

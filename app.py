@@ -2710,60 +2710,79 @@ class WBSystemCare(tk.Tk):
         p = tk.Frame(self._content, bg=C["bg"])
         self._pages["update"] = p
         _page_title(p, "🔄  Atualização do Programa",
-                    "Verifique se há uma nova versão disponível e faça o download.")
+                    "Verifique e instale novas versões automaticamente.")
 
-        # Card de versão atual
+        # ── Card: versão atual ────────────────────────────────────────────
         vc = _card(p)
         vc.pack(fill="x", padx=20, pady=(0, 8))
         tk.Frame(vc, bg=C["accent"], height=3).pack(fill="x")
         vi = tk.Frame(vc, bg=C["bg_card"])
-        vi.pack(fill="x", padx=16, pady=12)
-        tk.Label(vi, text="Versão instalada:", bg=C["bg_card"],
+        vi.pack(fill="x", padx=16, pady=14)
+
+        left_vi = tk.Frame(vi, bg=C["bg_card"])
+        left_vi.pack(side="left", fill="x", expand=True)
+        tk.Label(left_vi, text="Versão instalada:", bg=C["bg_card"],
                  fg=C["text_dim"], font=FONT_SMALL).pack(anchor="w")
-        tk.Label(vi, text="v1.3", bg=C["bg_card"],
-                 fg=C["accent"], font=("Segoe UI", 18, "bold")).pack(anchor="w")
-        tk.Label(vi, text="W.B. SystemCare — Usina da Paz Salinópolis",
+        tk.Label(left_vi, text="v1.5", bg=C["bg_card"],
+                 fg=C["accent"], font=("Segoe UI", 22, "bold")).pack(anchor="w")
+        tk.Label(left_vi, text="W.B. SystemCare — Usina da Paz Salinópolis",
                  bg=C["bg_card"], fg=C["text_dim"], font=FONT_SMALL).pack(anchor="w")
+
+        right_vi = tk.Frame(vi, bg=C["bg_card"])
+        right_vi.pack(side="right", padx=8)
+        tk.Label(right_vi, text="🔗 Repositório:",
+                 bg=C["bg_card"], fg=C["text_dim"], font=FONT_SMALL).pack(anchor="e")
+        tk.Label(right_vi, text="github.com/romeuwb/wb-systemcare",
+                 bg=C["bg_card"], fg=C["blue"], font=FONT_SMALL).pack(anchor="e")
 
         _hsep(p)
 
-        # Card de verificação online
+        # ── Card: verificação + auto-update ──────────────────────────────
         uc = _card(p)
         uc.pack(fill="x", padx=20, pady=(0, 8))
         tk.Frame(uc, bg=C["blue"], height=3).pack(fill="x")
         uh = tk.Frame(uc, bg=C["bg_card"])
-        uh.pack(fill="x", padx=16, pady=(10, 6))
-        tk.Label(uh, text="🔄  Verificação Online",
+        uh.pack(fill="x", padx=16, pady=(12, 6))
+        tk.Label(uh, text="🔄  Atualização Automática via GitHub",
                  bg=C["bg_card"], fg=C["blue_light"],
                  font=("Segoe UI", 11, "bold")).pack(anchor="w")
         tk.Label(uh,
-                 text="Verifica via GitHub Releases se há uma versão mais recente disponível.",
+                 text="Verifica, baixa e instala a nova versão automaticamente — "
+                      "substitui o .exe atual e reinicia.",
                  bg=C["bg_card"], fg=C["text_dim"], font=FONT_SMALL).pack(anchor="w")
 
-        # URL configurável
-        url_row = tk.Frame(uc, bg=C["bg_card"])
-        url_row.pack(fill="x", padx=16, pady=(0, 8))
-        tk.Label(url_row, text="URL:", bg=C["bg_card"],
-                 fg=C["text"], font=FONT_BODY, width=6, anchor="w").pack(side="left")
-        self._update_url_var = tk.StringVar(
-            value="https://api.github.com/repos/romeuwb/wb-systemcare/releases/latest"
-        )
-        tk.Entry(url_row, textvariable=self._update_url_var,
-                 bg=C["bg_input"], fg=C["text"], font=FONT_SMALL,
-                 relief="flat", bd=4, insertbackground=C["text"]).pack(
-                     side="left", fill="x", expand=True, padx=(0, 8))
+        # Como funciona
+        how = tk.Frame(uc, bg=C["bg_card"])
+        how.pack(fill="x", padx=16, pady=(0, 10))
+        steps_txt = [
+            ("1", "Verificar",  "Consulta o GitHub para ver se há versão nova"),
+            ("2", "Baixar",     "Faz download do novo .exe em segundo plano"),
+            ("3", "Substituir", "Fecha, substitui o arquivo atual e reinicia"),
+        ]
+        for num, title, desc in steps_txt:
+            sr = tk.Frame(how, bg=C["bg_card"])
+            sr.pack(anchor="w", pady=2)
+            tk.Label(sr, text=f" {num} ", bg=C["accent"], fg="#0d0b09",
+                     font=("Segoe UI", 9, "bold")).pack(side="left", padx=(0,8))
+            tk.Label(sr, text=f"{title}: ", bg=C["bg_card"], fg=C["text"],
+                     font=("Segoe UI", 9, "bold")).pack(side="left")
+            tk.Label(sr, text=desc, bg=C["bg_card"], fg=C["text_dim"],
+                     font=FONT_SMALL).pack(side="left")
 
         bf = tk.Frame(uc, bg=C["bg_card"])
-        bf.pack(padx=16, pady=(0, 12), anchor="w")
-        _btn(bf, "🔍  Verificar Agora",  self._update_check,    width=18).pack(side="left", padx=(0, 8))
-        _btn(bf, "⬇  Baixar Nova Versão", self._update_download, width=20).pack(side="left", padx=(0, 8))
-        _btn(bf, "🌐  Abrir no Browser",  self._update_open_web, width=18).pack(side="left")
+        bf.pack(padx=16, pady=(0, 14), anchor="w")
+        _btn(bf, "🔍  Verificar Agora",
+             self._update_check,    width=18).pack(side="left", padx=(0, 8))
+        _btn(bf, "⬇  Baixar e Instalar",
+             self._update_download, width=20).pack(side="left", padx=(0, 8))
+        _btn(bf, "🌐  Ver Releases",
+             self._update_open_web, width=16).pack(side="left")
 
         # Status
         self._update_status_lbl = tk.Label(
             p, text="Clique em 'Verificar Agora' para checar atualizações.",
             bg=C["bg_card"], fg=C["text_dim"], font=FONT_BODY,
-            justify="left", anchor="w", padx=16, pady=8, wraplength=680
+            justify="left", anchor="w", padx=16, pady=8, wraplength=700
         )
         self._update_status_lbl.pack(fill="x", padx=20, pady=(0, 4))
 
@@ -2782,8 +2801,6 @@ class WBSystemCare(tk.Tk):
         self._log(self._update_log, "Verificando atualizações em github.com/romeuwb/wb-systemcare...")
         self.after(0, lambda: self._update_status_lbl.config(
             text="⏳  Verificando...", fg=C["info"]))
-
-        # URLs fixas do repositório oficial
         API_LATEST = "https://api.github.com/repos/romeuwb/wb-systemcare/releases/latest"
         API_LIST   = "https://api.github.com/repos/romeuwb/wb-systemcare/releases"
         REPO_PAGE  = "https://github.com/romeuwb/wb-systemcare/releases"
@@ -2888,49 +2905,134 @@ class WBSystemCare(tk.Tk):
         threading.Thread(target=task, daemon=True).start()
 
     def _update_download(self):
+        """
+        Self-update automático:
+        1. Baixa o novo .exe para um arquivo temporário
+        2. Cria um script .bat que:
+           a. Aguarda o processo atual fechar
+           b. Substitui o .exe atual pelo novo
+           c. Inicia a nova versão
+           d. Apaga o script
+        3. Pergunta ao usuário se quer atualizar agora
+        4. Se sim, inicia o script e fecha o app
+        """
         if not self._update_download_url:
             messagebox.showinfo("Verificar primeiro",
                                 "Clique em 'Verificar Agora' antes de baixar."); return
-        dest = filedialog.asksaveasfilename(
-            title="Salvar nova versão",
-            initialfile=f"WB_SystemCare_{self._update_latest_ver or 'new'}.exe",
-            defaultextension=".exe",
-            filetypes=[("Executável", "*.exe"), ("Todos", "*.*")]
-        )
-        if not dest: return
 
-        self._log(self._update_log, f"Baixando de: {self._update_download_url}")
+        if not messagebox.askyesno(
+            "Atualizar Automaticamente",
+            f"Baixar e instalar a versão v{self._update_latest_ver or '?'} automaticamente?\n\n"
+            "O programa atual será substituído e reiniciará automaticamente.\n\n"
+            "Clique SIM para atualizar agora."
+        ): return
+
         self.after(0, lambda: self._update_status_lbl.config(
-            text="⬇  Baixando...", fg=C["info"]))
+            text="⬇  Baixando nova versão...", fg=C["info"]))
+        self._log(self._update_log, f"Iniciando download de: {self._update_download_url}")
 
         def task():
             try:
                 import urllib.request
-                urllib.request.urlretrieve(self._update_download_url, dest)
-                self.after(0, lambda: self._update_status_lbl.config(
-                    text=f"✔  Download concluído: {dest}", fg=C["success"]))
-                self._log(self._update_log, f"✔ Salvo em: {dest}")
-                self.after(0, lambda: messagebox.showinfo(
-                    "Download Concluído",
-                    f"Nova versão salva em:\n{dest}\n\n"
-                    "Feche o programa atual e execute o novo arquivo."))
+                import tempfile
+
+                # Caminho do executável atual
+                current_exe = sys.executable if getattr(sys, "frozen", False) \
+                    else os.path.abspath(__file__)
+                current_dir = os.path.dirname(current_exe)
+                current_pid = os.getpid()
+
+                # Arquivo temporário para o novo exe
+                tmp_fd, tmp_path = tempfile.mkstemp(suffix=".exe",
+                                                    prefix="WB_update_",
+                                                    dir=current_dir)
+                os.close(tmp_fd)
+
+                # Download com progresso
+                downloaded = [0]
+                def _progress(block, block_size, total):
+                    downloaded[0] += block_size
+                    if total > 0:
+                        pct = min(int(downloaded[0] * 100 / total), 100)
+                        self.after(0, lambda p=pct: self._update_status_lbl.config(
+                            text=f"⬇  Baixando... {p}%", fg=C["info"]))
+
+                urllib.request.urlretrieve(
+                    self._update_download_url, tmp_path, _progress)
+
+                self._log(self._update_log, f"✔ Download concluído: {tmp_path}")
+
+                # Cria script .bat de substituição automática
+                bat_path = os.path.join(current_dir, "_wb_update.bat")
+                bat_content = f"""@echo off
+:: WB SystemCare — Self-updater
+title Atualizando WB SystemCare...
+echo Aguardando o programa fechar...
+:wait
+tasklist /FI "PID eq {current_pid}" 2>nul | find /I "{current_pid}" >nul
+if not errorlevel 1 (
+    timeout /t 1 /nobreak >nul
+    goto wait
+)
+echo Instalando nova versao...
+move /Y "{tmp_path}" "{current_exe}" >nul 2>&1
+if errorlevel 1 (
+    echo Falha ao substituir. Tentando com xcopy...
+    xcopy /Y /Q "{tmp_path}" "{current_exe}" >nul 2>&1
+)
+echo Iniciando nova versao...
+start "" "{current_exe}"
+del "%~f0"
+"""
+                with open(bat_path, "w", encoding="ascii") as f:
+                    f.write(bat_content)
+
+                # Pergunta se quer reiniciar agora
+                def _ask_restart():
+                    if messagebox.askyesno(
+                        "✔ Download Concluído — Reiniciar?",
+                        f"v{self._update_latest_ver} baixada com sucesso!\n\n"
+                        "O programa será fechado, a nova versão instalada\n"
+                        "e reiniciado automaticamente.\n\n"
+                        "Deseja reiniciar agora?"
+                    ):
+                        self._update_status_lbl.config(
+                            text="🔄  Reiniciando com nova versão...", fg=C["success"])
+                        self._log(self._update_log, "Iniciando atualização e reiniciando...")
+                        # Inicia o bat em background e fecha o app
+                        import subprocess
+                        si = subprocess.STARTUPINFO()
+                        si.dwFlags = subprocess.STARTF_USESHOWWINDOW
+                        si.wShowWindow = 1  # SW_NORMAL — mostra o bat brevemente
+                        subprocess.Popen(
+                            ["cmd.exe", "/c", bat_path],
+                            creationflags=0x00000008,  # DETACHED_PROCESS
+                            startupinfo=si
+                        )
+                        self.after(500, self._quit_app)
+                    else:
+                        self._update_status_lbl.config(
+                            text=f"✔  v{self._update_latest_ver} baixada. "
+                                 f"Reinicie manualmente quando quiser.",
+                            fg=C["success"])
+                        self._log(self._update_log,
+                                  f"Nova versão pronta em: {tmp_path}\n"
+                                  f"Feche e execute para atualizar.")
+
+                self.after(0, _ask_restart)
+
             except Exception as e:
                 err = str(e)
                 self.after(0, lambda: self._update_status_lbl.config(
                     text=f"✘  Falha no download: {err}", fg=C["danger"]))
-                self._log(self._update_log, f"✘ Download falhou: {err}")
+                self._log(self._update_log, f"✘ Erro: {err}")
 
         threading.Thread(target=task, daemon=True).start()
 
     def _update_open_web(self):
-        url = self._update_url_var.get().strip()
-        # Converte API URL para página de releases
-        web_url = url.replace("api.github.com/repos","github.com")\
-                     .replace("/releases/latest","/releases")
-        if not web_url.startswith("http"):
-            web_url = "https://github.com/romeuwb/wb-systemcare/releases"
+        """Abre a página de releases do repositório no browser."""
         import webbrowser
-        webbrowser.open(web_url)
+        webbrowser.open("https://github.com/romeuwb/wb-systemcare/releases")
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
