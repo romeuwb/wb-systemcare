@@ -1,0 +1,25 @@
+# Compilação PyInstaller
+build/
+dist/
+*.spec
+
+# Logs e temporários
+*.log
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Scripts de build/debug
+validate_and_test.ps1
+fix_app.py
+debug_run.py
+inspect_logo.py
+
+# Arquivos temporários de credencial
+*.wbsc
+
+# IDE
+.vscode/
+.idea/
+*.kiro/
