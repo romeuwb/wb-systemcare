@@ -2775,8 +2775,8 @@ class WBSystemCare(tk.Tk):
              self._update_check,    width=18).pack(side="left", padx=(0, 8))
         _btn(bf, "⬇  Baixar e Instalar",
              self._update_download, width=20).pack(side="left", padx=(0, 8))
-        _btn(bf, "🌐  Ver Releases",
-             self._update_open_web, width=16).pack(side="left")
+        _btn(bf, "🌐  Abrir Site Oficial",
+             self._update_open_web, width=18).pack(side="left")
 
         # Status
         self._update_status_lbl = tk.Label(
@@ -3030,9 +3030,9 @@ del "%~f0"
         threading.Thread(target=task, daemon=True).start()
 
     def _update_open_web(self):
-        """Abre a página de releases do repositório no browser."""
+        """Abre a landing page do programa no browser."""
         import webbrowser
-        webbrowser.open("https://github.com/romeuwb/wb-systemcare/releases")
+        webbrowser.open("https://romeuwb.github.io/wb-systemcare/")
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
