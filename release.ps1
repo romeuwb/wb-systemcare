@@ -1,95 +1,62 @@
-# ============================================================
-# release.ps1 — WB SystemCare: build + git + GitHub Release
-# Uso: powershell -ExecutionPolicy Bypass -File release.ps1
-#      powershell -ExecutionPolicy Bypass -File release.ps1 -Version "1.6"
-#      powershell -ExecutionPolicy Bypass -File release.ps1 -Patch
-# ============================================================
+# release.ps1 - WB SystemCare: build + git + GitHub Release automatico
+# Uso:
+#   powershell -ExecutionPolicy Bypass -File release.ps1           (minor: 1.5 -> 1.6)
+#   powershell -ExecutionPolicy Bypass -File release.ps1 -Patch    (patch: 1.5 -> 1.5.1)
+#   powershell -ExecutionPolicy Bypass -File release.ps1 -Major    (major: 1.5 -> 2.0)
+#   powershell -ExecutionPolicy Bypass -File release.ps1 -Version "2.0"
+#   powershell -ExecutionPolicy Bypass -File release.ps1 -DryRun   (simula sem alterar)
 
 param(
-    [string]$Version  = "",     # Força uma versão específica, ex: "1.6"
-    [switch]$Patch,             # Incrementa só o patch: 1.5 → 1.5.1
-    [switch]$Minor,             # Incrementa minor: 1.5 → 1.6  (padrão)
-    [switch]$Major,             # Incrementa major: 1.5 → 2.0
-    [string]$Notes    = "",     # Notas da release (opcional)
-    [switch]$DryRun             # Simula sem fazer alterações
+    [string]$Version = "",
+    [switch]$Patch,
+    [switch]$Minor,
+    [switch]$Major,
+    [string]$Notes   = "",
+    [switch]$DryRun
 )
 
-$py    = "C:\Users\romeu\AppData\Local\Programs\Python\Python312\python.exe"
-$dir   = "d:\Projetos\limpaPC"
-$repo  = "romeuwb/wb-systemcare"
-$pages = "https://romeuwb.github.io/wb-systemcare/"
+$py   = "C:\Users\romeu\AppData\Local\Programs\Python\Python312\python.exe"
+$dir  = "d:\Projetos\limpaPC"
+$repo = "romeuwb/wb-systemcare"
+$site = "https://romeuwb.github.io/wb-systemcare/"
 
 Set-Location $dir
-
 $sep = "=" * 56
 
-function Write-Step([string]$msg) {
-    Write-Host ""
-    Write-Host "  $msg" -ForegroundColor Yellow
-}
-function Write-OK([string]$msg) {
-    Write-Host "  [OK] $msg" -ForegroundColor Green
-}
-function Write-Fail([string]$msg) {
-    Write-Host "  [ERRO] $msg" -ForegroundColor Red
-    exit 1
-}
-
 Write-Host $sep -ForegroundColor DarkYellow
-Write-Host "  W.B. SystemCare — Release Automatico" -ForegroundColor Yellow
-Write-Host "  Dev: Waldemir (@romeuwb)" -ForegroundColor DarkYellow
+Write-Host "  W.B. SystemCare - Release Automatico" -ForegroundColor Yellow
 Write-Host $sep -ForegroundColor DarkYellow
 
-# ── 1. Lê a versão atual do app.py ───────────────────────────────────────────
-Write-Step "Lendo versao atual..."
+# --- 1. Le versao atual do app.py ----------------------------------------
+Write-Host ""
+Write-Host "  [1/7] Lendo versao atual..." -ForegroundColor Cyan
 
-$currentLine = Select-String -Path "$dir\app.py" -Pattern 'CURRENT\s*=\s*"[\d\.]+"' | Select-Object -First 1
-if (-not $currentLine) {
-    # Fallback: busca no cabeçalho do arquivo
-    $currentLine = Select-String -Path "$dir\app.py" -Pattern 'Versão\s*:\s*[\d\.]+' | Select-Object -First 1
+$currentVer = "1.5"
+$match = Select-String -Path "$dir\app.py" -Pattern 'CURRENT\s*=\s*"([\d\.]+)"' | Select-Object -First 1
+if ($match -and $match.Line -match '"([\d\.]+)"') {
+    $currentVer = $Matches[1]
 }
+Write-Host "  Versao atual: v$currentVer" -ForegroundColor Green
 
-# Extrai a versão do texto encontrado
-$currentVer = ""
-if ($currentLine) {
-    if ($currentLine.Line -match '"([\d\.]+)"') {
-        $currentVer = $Matches[1]
-    } elseif ($currentLine.Line -match ':\s*([\d\.]+)') {
-        $currentVer = $Matches[1].Trim()
-    }
-}
-
-if (-not $currentVer) {
-    $currentVer = "1.5"
-    Write-Host "  Versao atual nao detectada, assumindo $currentVer" -ForegroundColor DarkYellow
-} else {
-    Write-OK "Versao atual: v$currentVer"
-}
-
-# ── 2. Calcula nova versão ────────────────────────────────────────────────────
-Write-Step "Calculando nova versao..."
+# --- 2. Calcula nova versao -----------------------------------------------
+Write-Host "  [2/7] Calculando nova versao..." -ForegroundColor Cyan
 
 if ($Version -ne "") {
     $newVer = $Version
 } else {
     $parts = $currentVer -split '\.'
-    $major = [int]($parts[0])
-    $minor = if ($parts.Count -ge 2) { [int]($parts[1]) } else { 0 }
-    $patch = if ($parts.Count -ge 3) { [int]($parts[2]) } else { 0 }
+    $maj   = [int]($parts[0])
+    $min   = if ($parts.Count -ge 2) { [int]($parts[1]) } else { 0 }
+    $pat   = if ($parts.Count -ge 3) { [int]($parts[2]) } else { 0 }
 
-    if ($Major) {
-        $major += 1; $minor = 0; $patch = 0
-    } elseif ($Patch) {
-        $patch += 1
-    } else {
-        # Padrão: incrementa minor
-        $minor += 1; $patch = 0
-    }
+    if ($Major) { $maj += 1; $min = 0; $pat = 0 }
+    elseif ($Patch) { $pat += 1 }
+    else { $min += 1; $pat = 0 }
 
-    $newVer = if ($patch -gt 0) { "$major.$minor.$patch" } else { "$major.$minor" }
+    $newVer = if ($pat -gt 0) { "$maj.$min.$pat" } else { "$maj.$min" }
 }
 
-Write-OK "Nova versao: v$newVer"
+Write-Host "  Nova versao: v$newVer" -ForegroundColor Yellow
 
 if ($DryRun) {
     Write-Host ""
@@ -98,66 +65,39 @@ if ($DryRun) {
     exit 0
 }
 
-# Confirmação
 $confirm = Read-Host "  Publicar v$newVer? (S/N)"
-if ($confirm -notmatch '^[Ss]') {
-    Write-Host "  Cancelado." -ForegroundColor DarkYellow
-    exit 0
-}
+if ($confirm -notmatch "^[Ss]") { Write-Host "  Cancelado."; exit 0 }
 
-# ── 3. Atualiza versão no app.py ──────────────────────────────────────────────
-Write-Step "Atualizando versao no app.py..."
+# --- 3. Atualiza versao no app.py -----------------------------------------
+Write-Host "  [3/7] Atualizando versao em app.py..." -ForegroundColor Cyan
 
-$appContent = Get-Content "$dir\app.py" -Raw -Encoding UTF8
+$content = Get-Content "$dir\app.py" -Raw -Encoding UTF8
+$content = $content -replace '(CURRENT\s*=\s*)"[\d\.]+"',    ('${1}"' + $newVer + '"')
+$content = $content -replace '(Versão\s*:\s*)[\d\.]+',        ('${1}' + $newVer)
+$content = $content -replace '(text=f"v)[\d\.]+(\s*•)',       ('${1}' + $newVer + '${2}')
+$content = $content -replace '(text="v)[\d\.]+(",)',           ('${1}' + $newVer + '${2}')
+Set-Content "$dir\app.py" -Value $content -Encoding UTF8 -NoNewline
+Write-Host "  app.py -> v$newVer" -ForegroundColor Green
 
-# Atualiza CURRENT = "x.x" no _update_check
-$appContent = $appContent -replace '(CURRENT\s*=\s*)"[\d\.]+"', "`${1}`"$newVer`""
-
-# Atualiza "vX.X" no _build_page_update
-$appContent = $appContent -replace '(text=")v[\d\.]+(", bg=C\["bg_card"\],\s*\n\s*fg=C\["accent"\], font=\("Segoe UI", 22)', "`${1}v$newVer`${2}"
-
-# Atualiza versão no cabeçalho do docstring
-$appContent = $appContent -replace '(Versão\s*:\s*)[\d\.]+', "`${1}$newVer"
-
-# Atualiza no header do app (v1.x no label)
-$appContent = $appContent -replace '("v)[\d\.]+(\s*•\s*")', "`${1}$newVer`${2}"
-$appContent = $appContent -replace '(text=f"v)[\d\.]+(\s*•)', "`${1}$newVer`${2}"
-
-Set-Content "$dir\app.py" -Value $appContent -Encoding UTF8 -NoNewline
-Write-OK "app.py atualizado para v$newVer"
-
-# ── 4. Valida sintaxe ──────────────────────────────────────────────────────────
-Write-Step "Validando sintaxe..."
-
-$allOk = $true
+# --- 4. Valida sintaxe ----------------------------------------------------
+Write-Host "  [4/7] Validando sintaxe..." -ForegroundColor Cyan
+$ok = $true
 foreach ($f in @("theme_restore.py","file_scanner.py","tray_win32.py","user_manager.py","credential_helper.py","app.py")) {
     $out = & $py -c "import ast; ast.parse(open(r'$dir\$f','r',encoding='utf-8').read()); print('OK')" 2>&1
-    if ($out -match "OK") {
-        Write-OK $f
-    } else {
-        Write-Host "  [ERRO] ${f}: $out" -ForegroundColor Red
-        $allOk = $false
-    }
+    if ($out -match "OK") { Write-Host "    OK: $f" -ForegroundColor Green }
+    else { Write-Host "    ERRO: $f : $out" -ForegroundColor Red; $ok = $false }
 }
-if (-not $allOk) { Write-Fail "Corrija os erros de sintaxe antes de publicar." }
+if (-not $ok) { Write-Host "  Corrija os erros antes de publicar." -ForegroundColor Red; exit 1 }
 
-# ── 5. Compila o .exe ──────────────────────────────────────────────────────────
-Write-Step "Compilando WB_SystemCare.exe..."
+# --- 5. Compila exe -------------------------------------------------------
+Write-Host "  [5/7] Compilando WB_SystemCare.exe..." -ForegroundColor Cyan
 
-# Remove build anterior
-if (Test-Path "$dir\build\WB_SystemCare") {
-    Remove-Item "$dir\build\WB_SystemCare" -Recurse -Force
-}
-if (Test-Path "$dir\WB_SystemCare.spec") {
-    Remove-Item "$dir\WB_SystemCare.spec" -Force
-}
-if (Test-Path "$dir\dist\WB_SystemCare.exe") {
-    Remove-Item "$dir\dist\WB_SystemCare.exe" -Force
-}
+if (Test-Path "$dir\build\WB_SystemCare") { Remove-Item "$dir\build\WB_SystemCare" -Recurse -Force }
+if (Test-Path "$dir\WB_SystemCare.spec")  { Remove-Item "$dir\WB_SystemCare.spec" -Force }
+if (Test-Path "$dir\dist\WB_SystemCare.exe") { Remove-Item "$dir\dist\WB_SystemCare.exe" -Force }
 
 & $py -m PyInstaller `
-    --onefile `
-    --windowed `
+    --onefile --windowed `
     --name "WB_SystemCare" `
     --icon "$dir\assets\logo.ico" `
     --add-data "$dir\theme_restore.py;." `
@@ -173,67 +113,43 @@ if (Test-Path "$dir\dist\WB_SystemCare.exe") {
     "$dir\app.py" | Out-Null
 
 if (-not (Test-Path "$dir\dist\WB_SystemCare.exe")) {
-    Write-Fail "Falha na compilacao — exe nao gerado."
+    Write-Host "  ERRO: exe nao gerado." -ForegroundColor Red; exit 1
 }
-
 $mb = [math]::Round((Get-Item "$dir\dist\WB_SystemCare.exe").Length / 1MB, 1)
-Write-OK "WB_SystemCare.exe gerado (${mb} MB)"
+Write-Host "  WB_SystemCare.exe gerado (${mb} MB)" -ForegroundColor Green
 
-# ── 6. Git commit + push ──────────────────────────────────────────────────────
-Write-Step "Enviando codigo para o GitHub..."
+# --- 6. Git commit + push -------------------------------------------------
+Write-Host "  [6/7] Enviando para o GitHub..." -ForegroundColor Cyan
 
-git add app.py README.md docs\index.html 2>&1 | Out-Null
-git add theme_restore.py file_scanner.py tray_win32.py user_manager.py credential_helper.py build_exe.ps1 .gitignore assets\logo.ico 2>&1 | Out-Null
-
-$commitMsg = "v$newVer - release automatica"
+git add app.py README.md release.ps1 docs\index.html theme_restore.py file_scanner.py tray_win32.py user_manager.py credential_helper.py build_exe.ps1 .gitignore assets\logo.ico 2>&1 | Out-Null
+$commitMsg = "v$newVer"
 git commit -m $commitMsg 2>&1 | Out-Null
 git push origin main 2>&1 | Out-Null
+Write-Host "  Codigo enviado: $commitMsg" -ForegroundColor Green
 
-Write-OK "Codigo enviado: $commitMsg"
+# --- 7. Cria release no GitHub --------------------------------------------
+Write-Host "  [7/7] Criando release v$newVer no GitHub..." -ForegroundColor Cyan
 
-# ── 7. Cria release no GitHub com o .exe ─────────────────────────────────────
-Write-Step "Criando release v$newVer no GitHub..."
-
-# Remove release anterior com a mesma tag, se existir
 gh release delete "v$newVer" --yes 2>&1 | Out-Null
 git tag -d "v$newVer" 2>&1 | Out-Null
 git push origin ":refs/tags/v$newVer" 2>&1 | Out-Null
 
-# Monta as notas da release
 $date = (Get-Date).ToString("dd/MM/yyyy")
-if ($Notes -eq "") {
-    $releaseNotes = "v$newVer — $date
+$releaseBody = "v$newVer - $date`nUsina da Paz Salinopolis - Sala de Tecnologia`nDesenvolvido por Waldemir`n`nSite: $site"
+if ($Notes -ne "") { $releaseBody = "${Notes}`n`nSite: $site" }
 
-Usina da Paz Salinopolis — Sala de Tecnologia
-Desenvolvido por Waldemir (@romeuwb)
-
-Site oficial: $pages
-Repositorio: https://github.com/$repo"
-} else {
-    $releaseNotes = "$Notes
-
-Site oficial: $pages"
-}
-
-# Cria a nova release
-$result = gh release create "v$newVer" "$dir\dist\WB_SystemCare.exe" `
+gh release create "v$newVer" "$dir\dist\WB_SystemCare.exe" `
     --title "WB SystemCare v$newVer" `
-    --notes $releaseNotes 2>&1
+    --notes $releaseBody 2>&1 | Out-Null
 
-if ($LASTEXITCODE -eq 0) {
-    Write-OK "Release v$newVer publicada: https://github.com/$repo/releases/tag/v$newVer"
-} else {
-    Write-Host "  [AVISO] $result" -ForegroundColor Yellow
-}
+Write-Host "  Release v$newVer publicada!" -ForegroundColor Green
 
-# ── 8. Resumo final ───────────────────────────────────────────────────────────
+# --- Resumo ---------------------------------------------------------------
 Write-Host ""
 Write-Host $sep -ForegroundColor DarkYellow
-Write-Host "  CONCLUIDO: v$currentVer --> v$newVer" -ForegroundColor Yellow
-Write-Host ""
+Write-Host "  CONCLUIDO: v$currentVer -> v$newVer" -ForegroundColor Yellow
 Write-Host "  Codigo  : https://github.com/$repo" -ForegroundColor Cyan
 Write-Host "  Release : https://github.com/$repo/releases/tag/v$newVer" -ForegroundColor Cyan
-Write-Host "  Site    : $pages" -ForegroundColor Cyan
+Write-Host "  Site    : $site" -ForegroundColor Cyan
 Write-Host "  EXE     : $dir\dist\WB_SystemCare.exe (${mb} MB)" -ForegroundColor Cyan
 Write-Host $sep -ForegroundColor DarkYellow
-Write-Host ""
