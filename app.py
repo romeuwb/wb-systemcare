@@ -43,6 +43,7 @@ logger = logging.getLogger(__name__)
 
 # ── Constantes de inicialização com Windows ───────────────────────────────────
 APP_NAME      = "WB_SystemCare"
+APP_VERSION   = "1.6"          # ← única fonte da verdade para a versão
 TASK_NAME     = "WB_SystemCare_AutoClean"
 STARTUP_TASK  = "WB_SystemCare_Startup"
 
@@ -376,10 +377,29 @@ class WBSystemCare(tk.Tk):
         self.state("zoomed")
         self.minsize(900, 600)
 
-        # Ícone
+        # Ícone da janela E da taskbar do Windows
         if os.path.exists(ICON_PATH):
-            try: self.iconbitmap(ICON_PATH)
-            except Exception: pass
+            try:
+                self.iconbitmap(ICON_PATH)
+            except Exception:
+                pass
+        # Força o ícone correto na barra de tarefas do Windows (AppUserModelID)
+        try:
+            import ctypes as _ico_ct
+            # Define AppUserModelID para que o Windows mostre o ícone correto na taskbar
+            _ico_ct.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                f"WaldEmirRomeuwb.WBSystemCare.{APP_VERSION}")
+            # No modo .py (sem .exe), força o ícone via hwnd
+            if not getattr(sys, "frozen", False) and os.path.exists(ICON_PATH):
+                self.update_idletasks()
+                hwnd = int(self.frame(), 16)
+                hicon = _ico_ct.windll.user32.LoadImageW(
+                    None, ICON_PATH, 1, 32, 32, 0x0010)
+                if hicon:
+                    _ico_ct.windll.user32.SendMessageW(hwnd, 0x0080, 0, hicon)  # WM_SETICON small
+                    _ico_ct.windll.user32.SendMessageW(hwnd, 0x0080, 1, hicon)  # WM_SETICON large
+        except Exception:
+            pass
 
         # Estado
         self._scan_items  = []
@@ -397,7 +417,8 @@ class WBSystemCare(tk.Tk):
         self._step_labels = []
         self._step_cards  = []
         self._tray        = None
-        self._cred_cache  = CredentialCache()   # credenciais admin da sessão
+        self._cred_cache  = CredentialCache()
+        self._running_since = None  # para watchdog de timeout
 
         self._build_ui()
         self._init_tray()
@@ -465,6 +486,35 @@ class WBSystemCare(tk.Tk):
 
     # ── Layout ────────────────────────────────────────────────────────────────
 
+    def _watchdog_check(self):
+        """
+        Libera o estado 'rodando' se estiver travado há mais de 3 minutos.
+        Evita que o programa fique bloqueado permanentemente.
+        """
+        if not self._running or self._running_since is None:
+            return
+        elapsed = (datetime.now() - self._running_since).total_seconds()
+        if elapsed >= 175:  # ~3 minutos
+            logger.warning(f"Watchdog: operação travada há {elapsed:.0f}s — liberando.")
+            self._running = False
+            self._running_since = None
+            self.after(0, lambda: self._running_lbl.config(
+                text="⚠ Operação interrompida (timeout)"))
+            self.after(0, lambda: self._set_status(
+                "⚠ Operação anterior interrompida por timeout. Pronto para nova operação."))
+            # Marca todas as etapas ativas como erro
+            for i in range(len(self._steps)):
+                if i < len(self._step_cards):
+                    card = self._step_cards[i]
+                    if hasattr(card, "_status_lbl"):
+                        txt = card._status_lbl.cget("text")
+                        if "andamento" in txt.lower():
+                            self.after(0, lambda c=card: (
+                                c._status_lbl.config(
+                                    text="⚠ Interrompido", fg=C["warning"]),
+                                c._top_bar.config(bg=C["warning"])
+                            ))
+
     def _build_ui(self):
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self._build_header()
@@ -517,7 +567,7 @@ class WBSystemCare(tk.Tk):
 
         right = tk.Frame(hdr, bg=C["bg_header"])
         right.pack(side="right", padx=20)
-        tk.Label(right, text=f"v1.3  •  {datetime.now().strftime('%d/%m/%Y')}",
+        tk.Label(right, text=f"v{APP_VERSION}  •  {datetime.now().strftime('%d/%m/%Y')}",
                  bg=C["bg_header"], fg=C["text_dim"], font=FONT_TINY).pack(anchor="e")
         tk.Label(right, text="Dev: Waldemir  @romeuwb",
                  bg=C["bg_header"], fg=C["accent_dim"], font=FONT_TINY).pack(anchor="e")
@@ -1662,9 +1712,13 @@ class WBSystemCare(tk.Tk):
         self.after(0, lambda: self._status_var.set(txt))
 
     def _set_running(self, running, msg=""):
-        self._running = running
+        self._running      = running
+        self._running_since = datetime.now() if running else None
         self.after(0, lambda: self._running_lbl.config(
             text="⚙ Processando..." if running else msg))
+        # Watchdog: se ainda estiver "rodando" após 3 minutos, libera automaticamente
+        if running:
+            self.after(180_000, self._watchdog_check)
 
     def _set_progress(self, pct):
         def _u():
@@ -2508,10 +2562,17 @@ class WBSystemCare(tk.Tk):
             self._set_progress(0)
             res = file_scanner.delete_items(items, cb)
             self._set_progress(1.0)
-            self._update_step(3, "done" if res["failed"]==0 else "error")
+            # Erro real apenas se nada foi excluído E houve falhas (não por arquivos em uso)
+            real_failures = res["failed"]
+            skipped       = res.get("skipped", 0)
+            step_state    = "done" if res["deleted"] > 0 or real_failures == 0 else "error"
+            self._update_step(3, step_state)
             self._set_running(False, f"✔ {res['deleted']} excluído(s)")
-            self._set_status(f"Exclusão: {res['deleted']} ok / {res['failed']} falha(s).")
-            self._log_all(f"Exclusão: {res['deleted']} ok, {res['failed']} falha(s).")
+            status_msg = f"Exclusão: {res['deleted']} ok"
+            if real_failures: status_msg += f" / {real_failures} falha(s)"
+            if skipped:        status_msg += f" / {skipped} em uso (ignorado)"
+            self._set_status(status_msg)
+            self._log_all(status_msg)
             deleted_paths = {i["path"] for i in items}
             self._scan_items = [i for i in self._scan_items if i["path"] not in deleted_paths]
             self._check_vars = {j: tk.BooleanVar(value=False) for j in range(len(self._scan_items))}
@@ -2576,7 +2637,8 @@ class WBSystemCare(tk.Tk):
 
                 for it in self._scan_items: it["selected"] = True
                 self._log_all(f"══ Automação: Excluindo {len(self._scan_items)} item(ns)…")
-                self._update_step(2,"done"); self._update_step(3,"active")
+                self._update_step(2, "done")
+                self._update_step(3, "active")
                 count = [0]
                 def del_cb(msg):
                     self._log_all(msg)
@@ -2584,14 +2646,17 @@ class WBSystemCare(tk.Tk):
                         count[0] += 1
                         self._set_progress(count[0] / max(len(self._scan_items),1))
                 res = file_scanner.delete_items(self._scan_items, del_cb)
-                self._update_step(3, "done" if res["failed"]==0 else "error")
+                real_failures = res["failed"]
+                step_state = "done" if res["deleted"] > 0 or real_failures == 0 else "error"
+                self._update_step(3, step_state)
                 done += 1; self._set_progress(1.0)
                 self._log_all(f"Exclusão: {res['deleted']} ok / {res['failed']} falha(s).")
                 self._scan_items = []
                 self._check_vars = {}
                 self.after(0, self._fill_tree)
             elif do_scan:
-                self._update_step(2,"done")
+                self._update_step(2, "done")
+                self._update_step(3, "pending")
 
             self._set_progress(1.0)
             self._set_running(False, "✔ Automação concluída")
@@ -2723,7 +2788,7 @@ class WBSystemCare(tk.Tk):
         left_vi.pack(side="left", fill="x", expand=True)
         tk.Label(left_vi, text="Versão instalada:", bg=C["bg_card"],
                  fg=C["text_dim"], font=FONT_SMALL).pack(anchor="w")
-        tk.Label(left_vi, text="v1.5", bg=C["bg_card"],
+        tk.Label(left_vi, text=f"v{APP_VERSION}", bg=C["bg_card"],
                  fg=C["accent"], font=("Segoe UI", 22, "bold")).pack(anchor="w")
         tk.Label(left_vi, text="W.B. SystemCare — Usina da Paz Salinópolis",
                  bg=C["bg_card"], fg=C["text_dim"], font=FONT_SMALL).pack(anchor="w")
@@ -2804,7 +2869,7 @@ class WBSystemCare(tk.Tk):
         API_LATEST = "https://api.github.com/repos/romeuwb/wb-systemcare/releases/latest"
         API_LIST   = "https://api.github.com/repos/romeuwb/wb-systemcare/releases"
         REPO_PAGE  = "https://github.com/romeuwb/wb-systemcare/releases"
-        CURRENT    = "1.5"
+        CURRENT    = APP_VERSION  # lê da constante central
 
         def task():
             try:
@@ -3049,6 +3114,24 @@ def main():
     if any(a.startswith("--auto-") for a in args):
         run_headless()
         return
+
+    # ── Instância única via Mutex do Windows ──────────────────────────────
+    # Impede múltiplas cópias no tray. Se já existe, foca a janela e sai.
+    MUTEX_NAME = "WBSystemCare_SingleInstance_Mutex"
+    _mutex = None
+    try:
+        import ctypes as _ct
+        _mutex = _ct.windll.kernel32.CreateMutexW(None, True, MUTEX_NAME)
+        last_err = _ct.windll.kernel32.GetLastError()
+        if last_err == 183:  # ERROR_ALREADY_EXISTS
+            # Já há uma instância rodando — tenta trazer a janela para frente
+            _HWND = _ct.windll.user32.FindWindowW(None, "W.B. SystemCare")
+            if _HWND:
+                _ct.windll.user32.ShowWindow(_HWND, 9)   # SW_RESTORE
+                _ct.windll.user32.SetForegroundWindow(_HWND)
+            sys.exit(0)
+    except Exception:
+        pass  # Falha no mutex não deve impedir execução
 
     # Se foi relançado com --elevated, recupera as credenciais do arquivo temporário
     elevated_user = ""

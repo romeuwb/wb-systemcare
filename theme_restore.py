@@ -332,16 +332,34 @@ def restore_colors(callback=None):
 # ── Tema padrão ───────────────────────────────────────────────────────────────
 
 def apply_default_windows_theme(callback=None):
+    """
+    Aplica configurações do tema padrão via registro, SEM abrir
+    a janela de Personalização do Windows.
+    O aero.theme é aplicado silenciosamente alterando as chaves de registro.
+    """
     try:
-        if callback: callback("Aplicando tema padrão do Windows...")
+        if callback: callback("Aplicando tema padrão do Windows (silencioso)...")
         system_root = os.environ.get("SystemRoot", r"C:\Windows")
-        theme = os.path.join(system_root, "resources", "Themes", "aero.theme")
-        if os.path.exists(theme):
-            os.startfile(theme)
-            if callback: callback("✔ Tema padrão aplicado.")
-            return True
-        if callback: callback("⚠ aero.theme não encontrado.")
-        return False
+
+        # Aplica via registro — sem abrir janela de personalização
+        theme_path = os.path.join(system_root, "resources", "Themes", "aero.theme")
+        _reg_set(winreg.HKEY_CURRENT_USER,
+                 r"Software\Microsoft\Windows\CurrentVersion\Themes",
+                 "CurrentTheme", theme_path)
+        _reg_set(winreg.HKEY_CURRENT_USER,
+                 r"Software\Microsoft\Windows\CurrentVersion\Themes",
+                 "LastHighContrastTheme", "")
+
+        # Notifica o sistema das mudanças sem abrir janela
+        try:
+            import ctypes
+            ctypes.windll.user32.SendMessageTimeoutW(
+                0xFFFF, 0x001A, 0, "ImmersiveColorSet", 0x0002, 3000, None)
+        except Exception:
+            pass
+
+        if callback: callback("✔ Tema padrão configurado (sem abrir janela).")
+        return True
     except Exception as e:
         if callback: callback(f"⚠ {e}")
         return False
@@ -468,15 +486,50 @@ def clear_browser_history(callback=None):
 # ── Restauração completa ──────────────────────────────────────────────────────
 
 def restore_all_theme(callback=None):
-    results = {
-        "wallpaper":   restore_wallpaper(callback),
-        "screensaver": restore_screensaver(callback),
-        "lock_screen": restore_lock_screen(callback),
-        "cursors":     restore_cursors(callback),
-        "colors":      restore_colors(callback),
-        "theme":       apply_default_windows_theme(callback),
-    }
-    _broadcast()
+    """
+    Executa cada restauração isolada com tratamento de exceção independente.
+    Uma função que falhar não trava as demais.
+    """
+    import threading
+
+    funcs = [
+        ("wallpaper",   restore_wallpaper),
+        ("screensaver", restore_screensaver),
+        ("lock_screen", restore_lock_screen),
+        ("cursors",     restore_cursors),
+        ("colors",      restore_colors),
+        ("theme",       apply_default_windows_theme),
+    ]
+    results = {}
+
+    for key, fn in funcs:
+        try:
+            # Executa cada função com timeout de 20s para não travar
+            result = [False]
+            def _run(f=fn, r=result):
+                try:
+                    r[0] = f(callback)
+                except Exception as e:
+                    logger.error(f"restore_all_theme/{f.__name__}: {e}")
+                    r[0] = False
+
+            t = threading.Thread(target=_run, daemon=True)
+            t.start()
+            t.join(timeout=20)  # máximo 20 segundos por etapa
+            if t.is_alive():
+                if callback: callback(f"⚠ {key}: timeout (20s) — pulando...")
+                results[key] = False
+            else:
+                results[key] = result[0]
+        except Exception as e:
+            logger.error(f"restore_all_theme: {key}: {e}")
+            results[key] = False
+
+    try:
+        _broadcast()
+    except Exception:
+        pass
+
     ok = sum(1 for v in results.values() if v)
     if callback:
         callback(f"\n✔ Restauração de tema: {ok}/{len(results)} etapas com sucesso.")

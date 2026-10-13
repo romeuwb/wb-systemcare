@@ -159,38 +159,67 @@ def _list_users_fallback() -> list:
 
 
 def get_admin_users() -> list:
-    """Retorna lista de usuários que são membros do grupo Administradores."""
+    """
+    Retorna nomes dos usuários LOCAIS que são membros do grupo Administradores.
+    Filtra apenas contas que existem e são válidas (não lista o grupo em si).
+    Inclui contas desativadas — o usuário pode querer autenticar com elas.
+    """
+    # PowerShell: lista membros locais do grupo Administradores
     ps = r"""
-$admins = @()
+$result = @()
 $groups = @('Administrators','Administradores')
 foreach ($g in $groups) {
     try {
         $members = Get-LocalGroupMember -Group $g -ErrorAction Stop
-        $admins += $members | Where-Object ObjectClass -eq 'User' |
-                   ForEach-Object { ($_.Name -split '\\')[-1] }
+        foreach ($m in $members) {
+            # Pega apenas contas locais desta máquina (não domínio)
+            if ($m.ObjectClass -eq 'User' -and $m.PrincipalSource -in @('Local','MicrosoftAccount')) {
+                $uname = ($m.Name -split '\\')[-1]
+                # Verifica se a conta existe como LocalUser
+                $u = Get-LocalUser -Name $uname -ErrorAction SilentlyContinue
+                if ($u) { $result += $uname }
+            }
+        }
     } catch {}
 }
-$admins | Sort-Object -Unique | ConvertTo-Json
+$result | Sort-Object -Unique | ConvertTo-Json -Compress
 """
     rc, out, _ = _run_ps(ps)
-    if rc == 0 and out.strip():
+    if rc == 0 and out.strip() and out.strip() != "null":
         try:
             data = json.loads(out)
             if isinstance(data, str): data = [data]
-            return [str(x) for x in data]
+            admins = [str(x).strip() for x in data if x and str(x).strip()]
+            if admins:
+                return admins
         except Exception:
             pass
-    # Fallback: net localgroup
-    rc2, out2, _ = _run("net localgroup Administradores")
-    if rc2 != 0:
-        rc2, out2, _ = _run("net localgroup Administrators")
-    admins = []
-    capture = False
-    for line in out2.splitlines():
-        if "---" in line: capture = True; continue
-        if capture and line.strip() and "O comando foi" not in line:
-            admins.append(line.strip())
-    return admins
+
+    # Fallback: net localgroup — parseia os membros manualmente
+    for group in ["Administradores", "Administrators"]:
+        rc2, out2, _ = _run(f'net localgroup "{group}"')
+        if rc2 != 0:
+            continue
+        admins = []
+        capture = False
+        for line in out2.splitlines():
+            stripped = line.strip()
+            if "---" in stripped:
+                capture = True
+                continue
+            if not capture or not stripped:
+                continue
+            # Ignora linhas de rodapé do net localgroup
+            if any(x in stripped.lower() for x in
+                   ["o comando foi", "the command completed", "mais de um nome"]):
+                break
+            # Ignora nomes com \ (são contas de domínio)
+            if "\\" not in stripped:
+                admins.append(stripped)
+        if admins:
+            return admins
+
+    return []
 
 
 # ── Alterar senha ─────────────────────────────────────────────────────────────

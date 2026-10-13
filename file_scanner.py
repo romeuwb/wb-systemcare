@@ -242,13 +242,14 @@ def scan_single_folder(folder_path: str, callback=None) -> list:
 
 def delete_items(items: list, callback=None) -> dict:
     import shutil
-    results      = {"deleted": 0, "failed": 0, "errors": []}
+    results      = {"deleted": 0, "failed": 0, "skipped": 0, "errors": []}
     deleted_dirs = set()
 
     sorted_items = sorted(items, key=lambda i: -i.get("depth", 0))
 
     for item in sorted_items:
         path = item["path"]
+        # Pula se ancestral já foi excluído
         skip = False
         for d in deleted_dirs:
             try:
@@ -271,6 +272,23 @@ def delete_items(items: list, callback=None) -> dict:
             results["deleted"] += 1
             if callback:
                 callback(f"✔ Excluído: {item['name']}")
+        except PermissionError as e:
+            # Arquivo em uso ou sem permissão — registra como aviso, não erro crítico
+            results["skipped"] += 1
+            msg = f"⚠ Em uso (ignorado): {item['name']}"
+            results["errors"].append(msg)
+            if callback: callback(msg)
+        except OSError as e:
+            if getattr(e, "winerror", 0) == 32:
+                # WinError 32 = arquivo em uso por outro processo
+                results["skipped"] += 1
+                msg = f"⚠ Em uso por outro processo (ignorado): {item['name']}"
+                results["errors"].append(msg)
+                if callback: callback(msg)
+            else:
+                results["failed"] += 1
+                results["errors"].append(f"{item['name']}: {e}")
+                if callback: callback(f"✘ Falha: {item['name']}: {e}")
         except Exception as e:
             results["failed"] += 1
             results["errors"].append(f"{item['name']}: {e}")

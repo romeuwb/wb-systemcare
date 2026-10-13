@@ -73,6 +73,7 @@ Write-Host "  [3/7] Atualizando versao em app.py..." -ForegroundColor Cyan
 
 $content = Get-Content "$dir\app.py" -Raw -Encoding UTF8
 $content = $content -replace '(CURRENT\s*=\s*)"[\d\.]+"',    ('${1}"' + $newVer + '"')
+$content = $content -replace '(APP_VERSION\s*=\s*)"[\d\.]+"', ('${1}"' + $newVer + '"')
 $content = $content -replace '(Versão\s*:\s*)[\d\.]+',        ('${1}' + $newVer)
 $content = $content -replace '(text=f"v)[\d\.]+(\s*•)',       ('${1}' + $newVer + '${2}')
 $content = $content -replace '(text="v)[\d\.]+(",)',           ('${1}' + $newVer + '${2}')
