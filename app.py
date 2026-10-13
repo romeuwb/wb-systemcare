@@ -427,6 +427,9 @@ class WBSystemCare(tk.Tk):
         if start_minimized:
             self.after(100, self._minimize_to_tray)
 
+        # Verificação automática de atualização em background (5s após abrir)
+        self.after(5000, self._auto_check_update)
+
     # ── Tray ──────────────────────────────────────────────────────────────────
 
     def _init_tray(self):
@@ -3091,6 +3094,85 @@ del "%~f0"
                 self.after(0, lambda: self._update_status_lbl.config(
                     text=f"✘  Falha no download: {err}", fg=C["danger"]))
                 self._log(self._update_log, f"✘ Erro: {err}")
+
+        threading.Thread(target=task, daemon=True).start()
+
+    def _auto_check_update(self):
+        """
+        Verificação automática de atualização ao abrir o programa.
+        Roda em background, sem bloquear a UI.
+        Notifica apenas se houver versão nova — não exibe nada se já está atualizado.
+        """
+        def task():
+            try:
+                import urllib.request
+                import urllib.error
+                import json as _json
+
+                API = "https://api.github.com/repos/romeuwb/wb-systemcare/releases/latest"
+                headers = {
+                    "User-Agent": f"WB-SystemCare/{APP_VERSION}",
+                    "Accept": "application/vnd.github+json",
+                }
+                req = urllib.request.Request(API, headers=headers)
+                with urllib.request.urlopen(req, timeout=8) as resp:
+                    data = _json.loads(resp.read().decode())
+
+                latest = data.get("tag_name", "").lstrip("vV")
+                if not latest:
+                    return
+
+                # Compara versões como tupla numérica
+                def _ver(s):
+                    try:
+                        return tuple(int(x) for x in s.split("."))
+                    except Exception:
+                        return (0,)
+
+                if _ver(latest) > _ver(APP_VERSION):
+                    # Há versão nova — salva URL do exe para download rápido
+                    assets = data.get("assets", [])
+                    exe_url = ""
+                    for a in assets:
+                        if a.get("name", "").endswith(".exe"):
+                            exe_url = a.get("browser_download_url", "")
+                            break
+                    self._update_download_url = exe_url or data.get("html_url", "")
+                    self._update_latest_ver   = latest
+
+                    def _notify():
+                        # Notificação discreta na barra de status
+                        self._set_status(
+                            f"🆕 Nova versão disponível: v{latest}  "
+                            f"(você tem v{APP_VERSION}) — vá em Atualização para instalar."
+                        )
+                        # Destaca o item Atualização na sidebar com badge dourado
+                        if "update" in self._nav_btns:
+                            b, bar, f = self._nav_btns["update"]
+                            b.config(text=f"  🔄  Atualização  🆕",
+                                     fg=C["accent_light"])
+                        # Balloon no tray se estiver minimizado
+                        if self._tray and not self.winfo_viewable():
+                            self._tray.show_balloon(
+                                "W.B. SystemCare — Atualização disponível",
+                                f"v{latest} disponível! Abra o programa para instalar."
+                            )
+                        # Também atualiza o label da aba Atualização se já foi construída
+                        try:
+                            self._update_status_lbl.config(
+                                text=f"🆕  Nova versão disponível: v{latest}  "
+                                     f"(você tem v{APP_VERSION})\n"
+                                     f"Clique em '⬇ Baixar e Instalar' para atualizar.",
+                                fg=C["accent"]
+                            )
+                        except Exception:
+                            pass
+
+                    self.after(0, _notify)
+                # Se está atualizado, não faz nada (sem mensagem desnecessária)
+
+            except Exception:
+                pass  # Falha silenciosa — sem internet ou GitHub indisponível
 
         threading.Thread(target=task, daemon=True).start()
 
