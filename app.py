@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 # ── Constantes de inicialização com Windows ───────────────────────────────────
 APP_NAME      = "WB_SystemCare"
-APP_VERSION   = "1.6"          # ← única fonte da verdade para a versão
+APP_VERSION   = "1.6.1"          # ← única fonte da verdade para a versão
 TASK_NAME     = "WB_SystemCare_AutoClean"
 STARTUP_TASK  = "WB_SystemCare_Startup"
 
