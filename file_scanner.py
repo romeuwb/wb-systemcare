@@ -241,15 +241,122 @@ def scan_single_folder(folder_path: str, callback=None) -> list:
 # ── Exclusão ──────────────────────────────────────────────────────────────────
 
 def delete_items(items: list, callback=None) -> dict:
+    """
+    Exclui itens de forma robusta:
+    - Pastas: tenta rmtree, se falhar tenta arquivo por arquivo
+    - Arquivos em uso (WinError 32): tenta forçar fechamento via ctypes, depois ignora
+    - Remove atributos somente-leitura antes de excluir
+    - Nunca trava — cada item tem seu próprio try/except
+    """
     import shutil
+    import ctypes
+
     results      = {"deleted": 0, "failed": 0, "skipped": 0, "errors": []}
     deleted_dirs = set()
 
-    sorted_items = sorted(items, key=lambda i: -i.get("depth", 0))
+    # Ordena: arquivos mais profundos primeiro, depois pastas
+    sorted_items = sorted(items, key=lambda i: (-i.get("depth", 0), i["is_dir"]))
+
+    def _force_remove_file(path: str) -> bool:
+        """Tenta remover um arquivo com múltiplas estratégias."""
+        for attempt in range(3):
+            try:
+                # Remove atributos somente-leitura/oculto/sistema
+                try:
+                    ctypes.windll.kernel32.SetFileAttributesW(path, 0x80)  # FILE_ATTRIBUTE_NORMAL
+                    os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+                except Exception:
+                    pass
+                os.remove(path)
+                return True
+            except PermissionError:
+                if attempt == 2:
+                    return False
+                import time; time.sleep(0.1)
+            except OSError as e:
+                if getattr(e, "winerror", 0) in (32, 5):  # Em uso ou acesso negado
+                    if attempt == 2:
+                        return False
+                    import time; time.sleep(0.1)
+                else:
+                    return False
+            except Exception:
+                return False
+        return False
+
+    def _onerror_handler(func, path, exc_info):
+        """Handler chamado pelo rmtree quando um arquivo não pode ser removido."""
+        try:
+            ctypes.windll.kernel32.SetFileAttributesW(path, 0x80)
+            os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+            func(path)
+        except Exception:
+            pass
+
+    def _remove_dir(path: str) -> tuple:
+        """
+        Remove pasta com estratégia progressiva:
+        1. rmtree direto
+        2. rmtree com onerror handler (remove read-only)
+        3. Arquivo por arquivo recursivamente
+        Retorna (deleted_count, skipped_count, failed_count)
+        """
+        del_c = skp_c = fail_c = 0
+
+        # Tenta rmtree direto primeiro
+        try:
+            shutil.rmtree(path, ignore_errors=False)
+            # Conta quantos itens foram dentro (estimativa)
+            del_c = 1
+            return del_c, skp_c, fail_c
+        except Exception:
+            pass
+
+        # Tenta com onerror handler
+        try:
+            shutil.rmtree(path, onerror=_onerror_handler)
+            if not os.path.exists(path):
+                del_c = 1
+                return del_c, skp_c, fail_c
+        except Exception:
+            pass
+
+        # Estratégia arquivo por arquivo
+        for dirpath, dirnames, filenames in os.walk(path, topdown=False):
+            # Remove arquivos
+            for fname in filenames:
+                fpath = os.path.join(dirpath, fname)
+                if _force_remove_file(fpath):
+                    del_c += 1
+                else:
+                    skp_c += 1
+
+            # Remove pasta vazia
+            try:
+                os.rmdir(dirpath)
+                del_c += 1
+            except Exception:
+                # Pasta ainda tem arquivos em uso — ignora
+                skp_c += 1
+
+        # Remove a raiz se ficou vazia
+        try:
+            if os.path.exists(path):
+                os.rmdir(path)
+        except Exception:
+            pass
+
+        return del_c, skp_c, fail_c
 
     for item in sorted_items:
         path = item["path"]
-        # Pula se ancestral já foi excluído
+
+        # Verifica se o caminho ainda existe
+        if not os.path.exists(path):
+            results["deleted"] += 1  # Já foi excluído (filho de pasta removida)
+            continue
+
+        # Pula se ancestral já foi excluído com sucesso
         skip = False
         for d in deleted_dirs:
             try:
@@ -259,41 +366,41 @@ def delete_items(items: list, callback=None) -> dict:
                 pass
         if skip:
             continue
+
         try:
             if item["is_dir"]:
-                shutil.rmtree(path, ignore_errors=False)
-                deleted_dirs.add(path)
+                del_c, skp_c, fail_c = _remove_dir(path)
+                if not os.path.exists(path):
+                    # Pasta removida com sucesso
+                    deleted_dirs.add(path)
+                    results["deleted"] += 1
+                    if callback: callback(f"✔ Pasta excluída: {item['name']}")
+                elif del_c > 0:
+                    # Removida parcialmente — alguns arquivos em uso
+                    results["deleted"] += 1
+                    results["skipped"] += skp_c
+                    deleted_dirs.add(path)
+                    if callback: callback(
+                        f"✔ Pasta excluída parcialmente: {item['name']} "
+                        f"({skp_c} arquivo(s) em uso ignorado(s))")
+                else:
+                    results["skipped"] += 1
+                    if callback: callback(
+                        f"⚠ Pasta em uso, ignorada: {item['name']}")
             else:
-                try:
-                    os.chmod(path, stat.S_IWRITE)
-                except Exception:
-                    pass
-                os.remove(path)
-            results["deleted"] += 1
-            if callback:
-                callback(f"✔ Excluído: {item['name']}")
-        except PermissionError as e:
-            # Arquivo em uso ou sem permissão — registra como aviso, não erro crítico
-            results["skipped"] += 1
-            msg = f"⚠ Em uso (ignorado): {item['name']}"
-            results["errors"].append(msg)
-            if callback: callback(msg)
-        except OSError as e:
-            if getattr(e, "winerror", 0) == 32:
-                # WinError 32 = arquivo em uso por outro processo
-                results["skipped"] += 1
-                msg = f"⚠ Em uso por outro processo (ignorado): {item['name']}"
-                results["errors"].append(msg)
-                if callback: callback(msg)
-            else:
-                results["failed"] += 1
-                results["errors"].append(f"{item['name']}: {e}")
-                if callback: callback(f"✘ Falha: {item['name']}: {e}")
+                if _force_remove_file(path):
+                    results["deleted"] += 1
+                    if callback: callback(f"✔ Excluído: {item['name']}")
+                else:
+                    results["skipped"] += 1
+                    if callback: callback(
+                        f"⚠ Em uso (ignorado): {item['name']}")
+
         except Exception as e:
             results["failed"] += 1
             results["errors"].append(f"{item['name']}: {e}")
-            if callback:
-                callback(f"✘ Falha: {item['name']}: {e}")
+            if callback: callback(f"✘ Falha: {item['name']}: {e}")
+
     return results
 
 

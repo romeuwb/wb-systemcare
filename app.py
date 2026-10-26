@@ -2576,9 +2576,26 @@ class WBSystemCare(tk.Tk):
             if skipped:        status_msg += f" / {skipped} em uso (ignorado)"
             self._set_status(status_msg)
             self._log_all(status_msg)
+            # Remove da lista: tanto os itens excluídos quanto seus filhos
             deleted_paths = {i["path"] for i in items}
-            self._scan_items = [i for i in self._scan_items if i["path"] not in deleted_paths]
-            self._check_vars = {j: tk.BooleanVar(value=False) for j in range(len(self._scan_items))}
+            from pathlib import Path as _Path
+            def _was_deleted(item_path):
+                """Retorna True se o item ou qualquer ancestral foi excluído."""
+                if item_path in deleted_paths:
+                    return True
+                for dp in deleted_paths:
+                    try:
+                        if _Path(item_path).is_relative_to(_Path(dp)):
+                            return True
+                    except Exception:
+                        pass
+                if not os.path.exists(item_path):
+                    return True
+                return False
+            self._scan_items = [i for i in self._scan_items
+                                 if not _was_deleted(i["path"])]
+            self._check_vars = {j: tk.BooleanVar(value=False)
+                                 for j in range(len(self._scan_items))}
             self.after(0, self._fill_tree)
         threading.Thread(target=task, daemon=True).start()
         self._show_safe("progress")
