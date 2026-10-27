@@ -88,7 +88,7 @@ logger = logging.getLogger(__name__)
 
 APP_NAME      = "WB_SystemCare"
 
-APP_VERSION   = "1.6.2"          # ← única fonte da verdade para a versão
+APP_VERSION   = "1.6.3"          # ← única fonte da verdade para a versão
 
 TASK_NAME     = "WB_SystemCare_AutoClean"
 

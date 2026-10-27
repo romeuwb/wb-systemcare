@@ -110,19 +110,21 @@ def validate_credentials(username: str, password: str,
 
 def relaunch_as_admin(username: str, password: str) -> bool:
     """
-    Salva as credenciais num arquivo temporário seguro e relança o processo
-    atual com ShellExecuteW "runas", que solicita o UAC/elevação.
+    Relança o processo atual com as credenciais do administrador informado.
 
-    O processo relançado receberá --elevated como argumento e saberá que
-    já está rodando com privilégios elevados.
+    Usa CreateProcessWithLogonW (Win32) que aceita user+senha diretamente,
+    sem depender do UAC do usuário atual — funciona mesmo com usuário comum.
 
-    Retorna True se o relançamento foi iniciado (o processo atual deve terminar).
+    O novo processo recebe --elevated e --cred-file para recuperar as
+    credenciais e saber que está rodando elevado.
     """
     try:
-        exe = sys.executable
+        import tempfile
+
+        exe       = sys.executable
         args_list = list(sys.argv)
 
-        # Grava credenciais num arquivo temporário que o novo processo vai ler
+        # Grava credenciais em arquivo temporário para o novo processo ler
         tmp = tempfile.NamedTemporaryFile(
             mode="w", suffix=".wbsc", delete=False,
             encoding="utf-8", prefix="wbsc_"
@@ -131,28 +133,132 @@ def relaunch_as_admin(username: str, password: str) -> bool:
         tmp_path = tmp.name
         tmp.close()
 
-        # Monta argumentos: adiciona --elevated e --cred-file
         extra = ["--elevated", f"--cred-file={tmp_path}"]
-        # Remove args anteriores de elevação para não duplicar
         clean_args = [a for a in args_list[1:]
                       if not a.startswith("--elevated")
                       and not a.startswith("--cred-file")]
         all_args = clean_args + extra
 
         if getattr(sys, "frozen", False):
-            # Modo .exe
-            params = " ".join(f'"{a}"' for a in all_args)
-            shell32.ShellExecuteW(None, "runas", exe, params, None, 1)
+            # .exe compilado
+            cmd_line = exe + " " + " ".join(f'"{a}"' for a in all_args)
+            app_name = exe
         else:
-            # Modo .py
+            # .py em desenvolvimento
             script = os.path.abspath(args_list[0])
-            params = f'"{script}" ' + " ".join(f'"{a}"' for a in all_args)
-            shell32.ShellExecuteW(None, "runas", exe, params, None, 1)
+            cmd_line = f'"{exe}" "{script}" ' + " ".join(f'"{a}"' for a in all_args)
+            app_name = exe
 
-        return True
+        # Tenta CreateProcessWithLogonW (não precisa de UAC)
+        try:
+            ok = _launch_with_logon(username, password, app_name, cmd_line)
+            if ok:
+                return True
+        except Exception as e:
+            logger.warning(f"CreateProcessWithLogonW falhou: {e}")
+
+        # Fallback: ShellExecuteW runas (pede UAC — funciona se usuário tem conta admin)
+        try:
+            params = " ".join(f'"{a}"' for a in all_args)
+            if not getattr(sys, "frozen", False):
+                script = os.path.abspath(args_list[0])
+                params = f'"{script}" ' + params
+            ret = shell32.ShellExecuteW(None, "runas", exe, params, None, 1)
+            if int(ret) > 32:  # >32 = sucesso
+                return True
+        except Exception as e:
+            logger.warning(f"ShellExecuteW runas falhou: {e}")
+
+        return False
     except Exception as e:
         logger.error(f"relaunch_as_admin: {e}")
         return False
+
+
+def _launch_with_logon(username: str, password: str,
+                        app_name: str, cmd_line: str) -> bool:
+    """
+    Lança processo com as credenciais fornecidas via CreateProcessWithLogonW.
+    Não precisa de UAC — usa o token do admin diretamente.
+    LOGON_WITH_PROFILE (1) carrega o perfil do admin.
+    """
+    import ctypes
+    import ctypes.wintypes as wt
+
+    # Estruturas necessárias
+    class STARTUPINFOW(ctypes.Structure):
+        _fields_ = [
+            ("cb",              wt.DWORD),
+            ("lpReserved",      wt.LPWSTR),
+            ("lpDesktop",       wt.LPWSTR),
+            ("lpTitle",         wt.LPWSTR),
+            ("dwX",             wt.DWORD),
+            ("dwY",             wt.DWORD),
+            ("dwXSize",         wt.DWORD),
+            ("dwYSize",         wt.DWORD),
+            ("dwXCountChars",   wt.DWORD),
+            ("dwYCountChars",   wt.DWORD),
+            ("dwFillAttribute", wt.DWORD),
+            ("dwFlags",         wt.DWORD),
+            ("wShowWindow",     wt.WORD),
+            ("cbReserved2",     wt.WORD),
+            ("lpReserved2",     ctypes.c_char_p),
+            ("hStdInput",       wt.HANDLE),
+            ("hStdOutput",      wt.HANDLE),
+            ("hStdError",       wt.HANDLE),
+        ]
+
+    class PROCESS_INFORMATION(ctypes.Structure):
+        _fields_ = [
+            ("hProcess",    wt.HANDLE),
+            ("hThread",     wt.HANDLE),
+            ("dwProcessId", wt.DWORD),
+            ("dwThreadId",  wt.DWORD),
+        ]
+
+    LOGON_WITH_PROFILE = 1
+    CREATE_NO_WINDOW   = 0x08000000
+    NORMAL_PRIORITY    = 0x00000020
+
+    si = STARTUPINFOW()
+    si.cb        = ctypes.sizeof(STARTUPINFOW)
+    si.dwFlags   = 0x0001   # STARTF_USESHOWWINDOW
+    si.wShowWindow = 1      # SW_SHOWNORMAL
+
+    pi = PROCESS_INFORMATION()
+
+    # Extrai domínio e usuario
+    if "\\" in username:
+        domain, uname = username.split("\\", 1)
+    else:
+        domain, uname = ".", username
+
+    # cmd_line precisa ser mutável (buffer)
+    cmd_buf = ctypes.create_unicode_buffer(cmd_line)
+
+    ok = ctypes.windll.advapi32.CreateProcessWithLogonW(
+        uname,          # lpUsername
+        domain,         # lpDomain ("." = máquina local)
+        password,       # lpPassword
+        LOGON_WITH_PROFILE,  # dwLogonFlags
+        None,           # lpApplicationName (None = usa cmd_line)
+        cmd_buf,        # lpCommandLine
+        CREATE_NO_WINDOW | NORMAL_PRIORITY,  # dwCreationFlags
+        None,           # lpEnvironment
+        None,           # lpCurrentDirectory
+        ctypes.byref(si),
+        ctypes.byref(pi),
+    )
+
+    if ok:
+        # Fecha handles do processo filho
+        ctypes.windll.kernel32.CloseHandle(pi.hProcess)
+        ctypes.windll.kernel32.CloseHandle(pi.hThread)
+        return True
+    else:
+        err = ctypes.GetLastError()
+        raise RuntimeError(f"CreateProcessWithLogonW falhou: erro {err}")
+
 
 
 def read_elevated_creds() -> tuple:
