@@ -88,7 +88,7 @@ logger = logging.getLogger(__name__)
 
 APP_NAME      = "WB_SystemCare"
 
-APP_VERSION   = "1.6.3"          # ← única fonte da verdade para a versão
+APP_VERSION   = "1.6.4"          # ← única fonte da verdade para a versão
 
 TASK_NAME     = "WB_SystemCare_AutoClean"
 
@@ -425,53 +425,82 @@ def startup_register(all_users: bool, minimized: bool, callback=None) -> bool:
     all_users=False -> HKCU Run (so o usuario atual, sem precisar de admin).
     """
     try:
-        exe  = _exe_path()
-        args = f"{exe} --minimized" if minimized else exe
-        ok   = True
+        ok = True
+
+        # Caminho real do executável (sem aspas extras)
+        if getattr(sys, "frozen", False):
+            real_exe = sys.executable          # modo .exe compilado
+        else:
+            real_exe = sys.executable          # modo .py: python.exe
+            # Se .py, adiciona o script como argumento
+            real_exe = f'{sys.executable}" "{os.path.abspath(__file__)}'
+
+        # Valor para o registro Run (com aspas)
+        if minimized:
+            reg_value = f'"{real_exe}" --minimized'
+        else:
+            reg_value = f'"{real_exe}"'
+
+        # Valor para schtasks /TR — o /TR precisa de aspas internas escapadas
+        # Formato: "\"C:\caminho\exe.exe\" --arg"
+        if minimized:
+            tr_value = f'\\"{real_exe}\\" --minimized'
+        else:
+            tr_value = f'\\"{real_exe}\\"'
 
         if all_users:
-            # schtasks /ONLOGON — inicia para qualquer usuario que fizer login
-            # /TR precisa do caminho sem as aspas externas do _exe_path()
-            raw_exe = sys.executable if getattr(sys, "frozen", False) else \
-                      f"{sys.executable} \"{os.path.abspath(__file__)}\""
-            raw_args = f"{raw_exe} --minimized" if minimized else raw_exe
+            # Task Scheduler ONLOGON — cobre todos os perfis
             cmd = (
                 f'schtasks /Create /F /TN "{STARTUP_TASK}" '
-                f'/TR "{raw_args}" '
+                f'/TR "{tr_value}" '
                 f'/SC ONLOGON /RL HIGHEST'
             )
             r = _run_silent(cmd)
             if r.returncode == 0:
-                if callback: callback("✔ Tarefa de inicializacao criada para todos os perfis.")
+                if callback: callback("✔ Tarefa criada — inicia para todos os perfis no login.")
             else:
-                err_msg = r.stderr.strip() or r.stdout.strip()
-                if callback: callback(f"⚠ Task Scheduler: {err_msg}")
-                ok = False
+                err_msg = (r.stderr or r.stdout).strip()
+                if callback: callback(f"⚠ Task Scheduler falhou: {err_msg}")
+                # Tenta sem /RL HIGHEST (pode ser falta de admin)
+                cmd2 = (
+                    f'schtasks /Create /F /TN "{STARTUP_TASK}" '
+                    f'/TR "{tr_value}" '
+                    f'/SC ONLOGON'
+                )
+                r2 = _run_silent(cmd2)
+                if r2.returncode == 0:
+                    if callback: callback("✔ Tarefa criada (sem elevacao).")
+                else:
+                    ok = False
+                    if callback: callback(
+                        "✘ Falha no Task Scheduler. "
+                        "Tente executar o programa como Administrador.")
 
-            # Tenta HKLM como backup
+            # Também grava HKLM como backup (requer admin)
             try:
                 with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
                                     r"Software\Microsoft\Windows\CurrentVersion\Run",
                                     0, winreg.KEY_SET_VALUE) as k:
-                    winreg.SetValueEx(k, APP_NAME, 0, winreg.REG_SZ, args)
+                    winreg.SetValueEx(k, APP_NAME, 0, winreg.REG_SZ, reg_value)
                 if callback: callback("✔ Registro HKLM atualizado.")
             except PermissionError:
-                if callback: callback("⚠ Sem permissao para HKLM — execute como Administrador.")
+                if callback: callback(
+                    "⚠ HKLM requer Administrador — so Task Scheduler foi configurado.")
             except Exception as e:
                 if callback: callback(f"⚠ HKLM: {e}")
         else:
-            # HKCU — so o usuario atual, funciona sem admin
+            # HKCU — funciona sem admin, cobre apenas o usuario atual
             with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
                                 r"Software\Microsoft\Windows\CurrentVersion\Run",
                                 0, winreg.KEY_SET_VALUE) as k:
-                winreg.SetValueEx(k, APP_NAME, 0, winreg.REG_SZ, args)
-            if callback: callback("✔ Inicializacao registrada para o usuario atual (HKCU).")
+                winreg.SetValueEx(k, APP_NAME, 0, winreg.REG_SZ, reg_value)
+            if callback: callback(
+                f"✔ Inicializacao registrada para '{os.environ.get('USERNAME','usuario atual')}'.")
 
         return ok
     except Exception as e:
-        if callback: callback(f"✘ Erro ao registrar inicializacao: {e}")
+        if callback: callback(f"✘ Erro: {e}")
         return False
-
 
 
 def startup_remove(callback=None) -> bool:
