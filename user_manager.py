@@ -226,53 +226,120 @@ $result | Sort-Object -Unique | ConvertTo-Json -Compress
 
 def change_password(username: str, new_password: str,
                     callback=None, creds=None) -> bool:
+    """
+    Altera a senha usando net user diretamente.
+    Se não tiver privilégios, usa runas via credenciais sem WinRM.
+    """
     if not username or not new_password:
         if callback: callback("✘ Usuário e senha são obrigatórios.")
         return False
     if callback: callback(f"Alterando senha de '{username}'...")
 
-    net_args = f'user "{username}" "{new_password}"'
-
-    if creds and creds.has_credentials:
-        rc, out, err = _run_net_as(net_args, creds)
-    else:
-        rc, out, err = _run(f"net {net_args}")
-
-    ok = rc == 0
-    if ok:
+    # Tenta direto primeiro (funciona se já é admin)
+    rc, out, err = _run(f'net user "{username}" "{new_password}"')
+    if rc == 0:
         if callback: callback(f"✔ Senha de '{username}' alterada.")
+        return True
+
+    # Se tem credenciais e falhou, tenta via PowerShell com credenciais
+    # usando Set-LocalUser que não precisa de WinRM
+    if creds and creds.has_credentials:
+        safe_pwd = new_password.replace('"', '`"')
+        ps = (
+            f'$secure = ConvertTo-SecureString "{safe_pwd}" -AsPlainText -Force; '
+            f'Set-LocalUser -Name "{username}" -Password $secure'
+        )
+        # Roda PowerShell com o token do usuário admin (sem WinRM)
+        u = creds.username
+        p = creds.get_password().replace('"', '`"')
+        d = creds.domain
+        full = f"{d}\\{u}" if d and d != "." else u
+
+        # Cria processo PowerShell com credenciais do admin usando Start-Process
+        launcher = (
+            f'$pw = ConvertTo-SecureString "{p}" -AsPlainText -Force; '
+            f'$cr = New-Object System.Management.Automation.PSCredential ("{full}", $pw); '
+            f'$cmd = [scriptblock]::Create(\"'
+            f'$s = ConvertTo-SecureString \\\"{safe_pwd}\\\" -AsPlainText -Force; '
+            f'Set-LocalUser -Name \\\"{username}\\\" -Password $s\"); '
+            f'Start-Process powershell -Credential $cr -ArgumentList '
+            f'"-NoProfile -WindowStyle Hidden -Command & {{$cmd}}" -Wait -WindowStyle Hidden'
+        )
+        rc2, _, err2 = _run_ps(launcher)
+        if rc2 == 0:
+            if callback: callback(f"✔ Senha de '{username}' alterada.")
+            return True
+
+        # Último fallback: net user via cmd com runas simulado
+        rc3, out3, err3 = _run_net_as(f'user "{username}" "{new_password}"', creds)
+        if rc3 == 0:
+            if callback: callback(f"✔ Senha de '{username}' alterada.")
+            return True
+        msg = (err3 or err2 or err or out).strip()
     else:
         msg = (err or out).strip()
-        if callback: callback(f"✘ Erro: {msg}")
-    return ok
+
+    if callback: callback(f"✘ Erro ao alterar senha: {msg}")
+    return False
 
 
 # ── Expiração de senha ────────────────────────────────────────────────────────
 
 def set_password_never_expires(username: str, never: bool,
                                 callback=None, creds=None) -> bool:
+    """
+    Define se a senha do usuário nunca expira.
+    Usa net user e wmic diretamente — sem WinRM/Invoke-Command.
+    """
     label = "nunca expira" if never else "expira conforme política"
     if callback: callback(f"Configurando senha de '{username}': {label}...")
 
-    ps = f'Set-LocalUser -Name "{username}" -PasswordNeverExpires ${str(never).lower()}'
-
-    rc, _, err = (_run_ps_as(ps, creds) if creds and creds.has_credentials
-                  else _run_ps(ps))
-
-    if rc == 0:
+    # Estratégia 1: net user (mais compatível, não precisa de WinRM)
+    flag = "/expires:never" if never else "/expires:yes"
+    # net user não tem flag de expiração de senha diretamente,
+    # mas podemos usar wmic que é o mais confiável localmente
+    wmic_val = "FALSE" if never else "TRUE"
+    rc, out, err = _run(
+        f'wmic useraccount where name="{username}" set PasswordExpires={wmic_val}'
+    )
+    if rc == 0 and "updated" in out.lower():
         if callback: callback(f"✔ Senha de '{username}': {label}.")
         return True
 
-    # Fallback wmic
-    wmic_val = "FALSE" if never else "TRUE"
-    rc2, _, _ = _run(
-        f'wmic useraccount where name="{username}" set PasswordExpires={wmic_val}'
-    )
+    # Estratégia 2: PowerShell Set-LocalUser (sem Invoke-Command)
+    ps = f'Set-LocalUser -Name "{username}" -PasswordNeverExpires ${str(never).lower()}'
+    rc2, _, err2 = _run_ps(ps)
     if rc2 == 0:
-        if callback: callback(f"✔ Senha de '{username}': {label} (wmic).")
+        if callback: callback(f"✔ Senha de '{username}': {label}.")
         return True
 
-    if callback: callback(f"✘ Erro: {(err or '').strip()}")
+    # Estratégia 3: net accounts / ADSI como último recurso
+    never_val = "0" if never else "1"
+    ps3 = (
+        f'$u = [adsi]"WinNT://./{username},user"; '
+        f'$u.PasswordExpired = 0; '
+        f'$u.UserFlags.Value = if($u.UserFlags.Value -band 65536) '
+        f'{{ if("{never_val}" -eq "0") {{ $u.UserFlags.Value }} '
+        f'else {{ $u.UserFlags.Value -bxor 65536 }} }} '
+        f'else {{ if("{never_val}" -eq "0") {{ $u.UserFlags.Value -bor 65536 }} '
+        f'else {{ $u.UserFlags.Value }} }}; '
+        f'$u.SetInfo()'
+    )
+    rc3, _, err3 = _run_ps(ps3)
+    if rc3 == 0:
+        if callback: callback(f"✔ Senha de '{username}': {label} (ADSI).")
+        return True
+
+    # Se tem credenciais, tenta com elas mas usando PowerShell local (não remoto)
+    if creds and creds.has_credentials:
+        ps4 = f'Set-LocalUser -Name "{username}" -PasswordNeverExpires ${str(never).lower()}'
+        rc4, _, err4 = _run_ps_as(ps4, creds)
+        if rc4 == 0:
+            if callback: callback(f"✔ Senha de '{username}': {label}.")
+            return True
+
+    msg = (err or err2 or err3 or "").strip()
+    if callback: callback(f"✘ Erro: {msg}")
     return False
 
 
