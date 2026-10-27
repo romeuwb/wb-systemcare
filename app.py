@@ -419,97 +419,57 @@ def startup_is_registered() -> bool:
 
 
 def startup_register(all_users: bool, minimized: bool, callback=None) -> bool:
-
     """
-
     Registra o app para iniciar com o Windows.
-
-    all_users=True → usa HKLM + Task Scheduler (requer admin).
-
-    all_users=False → usa HKCU Run (só o usuário atual).
-
-    minimized=True  → passa --minimized para abrir na tray.
-
+    all_users=True  -> Task Scheduler ONLOGON (todos os perfis, requer admin).
+    all_users=False -> HKCU Run (so o usuario atual, sem precisar de admin).
     """
-
     try:
-
-        exe   = _exe_path()
-
-        args  = f"{exe} --minimized" if minimized else exe
-
-        ok    = True
-
-
+        exe  = _exe_path()
+        args = f"{exe} --minimized" if minimized else exe
+        ok   = True
 
         if all_users:
-
-            # Task Scheduler com SYSTEM ou USERS — funciona para todos os perfis
-
+            # schtasks /ONLOGON — inicia para qualquer usuario que fizer login
+            # /TR precisa do caminho sem as aspas externas do _exe_path()
+            raw_exe = sys.executable if getattr(sys, "frozen", False) else \
+                      f"{sys.executable} \"{os.path.abspath(__file__)}\""
+            raw_args = f"{raw_exe} --minimized" if minimized else raw_exe
             cmd = (
-
                 f'schtasks /Create /F /TN "{STARTUP_TASK}" '
-
-                f'/TR "{exe} --minimized" '
-
-                f'/SC ONLOGON /RL HIGHEST /DELAY 0000:30'
-
+                f'/TR "{raw_args}" '
+                f'/SC ONLOGON /RL HIGHEST'
             )
-
             r = _run_silent(cmd)
-
-            if r.returncode != 0:
-
-                if callback: callback(f"⚠ Task Scheduler: {r.stderr.strip()}")
-
+            if r.returncode == 0:
+                if callback: callback("✔ Tarefa de inicializacao criada para todos os perfis.")
+            else:
+                err_msg = r.stderr.strip() or r.stdout.strip()
+                if callback: callback(f"⚠ Task Scheduler: {err_msg}")
                 ok = False
 
-            else:
-
-                if callback: callback("✔ Tarefa de inicialização criada (todos os perfis).")
-
-
-
-            # Também tenta HKLM para garantir
-
+            # Tenta HKLM como backup
             try:
-
                 with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
-
                                     r"Software\Microsoft\Windows\CurrentVersion\Run",
-
                                     0, winreg.KEY_SET_VALUE) as k:
-
                     winreg.SetValueEx(k, APP_NAME, 0, winreg.REG_SZ, args)
-
-                if callback: callback("✔ Registro HKLM Run atualizado.")
-
+                if callback: callback("✔ Registro HKLM atualizado.")
             except PermissionError:
-
-                if callback: callback("⚠ Sem permissão para HKLM (execute como Admin).")
-
+                if callback: callback("⚠ Sem permissao para HKLM — execute como Administrador.")
+            except Exception as e:
+                if callback: callback(f"⚠ HKLM: {e}")
         else:
-
-            # Só o usuário atual — HKCU, sem precisar de admin
-
+            # HKCU — so o usuario atual, funciona sem admin
             with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
-
                                 r"Software\Microsoft\Windows\CurrentVersion\Run",
-
                                 0, winreg.KEY_SET_VALUE) as k:
-
                 winreg.SetValueEx(k, APP_NAME, 0, winreg.REG_SZ, args)
-
-            if callback: callback("✔ Inicialização registrada para o usuário atual (HKCU).")
-
-
+            if callback: callback("✔ Inicializacao registrada para o usuario atual (HKCU).")
 
         return ok
-
     except Exception as e:
-
-        if callback: callback(f"✘ Erro ao registrar inicialização: {e}")
-
+        if callback: callback(f"✘ Erro ao registrar inicializacao: {e}")
         return False
 
 
